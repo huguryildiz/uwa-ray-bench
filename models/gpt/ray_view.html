@@ -2435,13 +2435,39 @@ ASSUMPTIONS AND NUMERICAL MODEL
   </script>
 <script>
 (function(){
-  var UI_SELS=['.topbar','#legend','#statusPanel','#colorbar'];
+  var CTRL_SELS=['.topbar'];
+  var ALL_SELS=['.topbar','#legend','#statusPanel','#colorbar'];
   window.addEventListener('message',function(e){
-    if(!e.data||e.data.type!=='hide_ui')return;
-    var v=e.data.hidden?'none':'';
-    UI_SELS.forEach(function(s){
-      document.querySelectorAll(s).forEach(function(el){el.style.display=v;});
-    });
+    var d=e.data; if(!d)return;
+    var t=d.type,v,btn,es,as,ss,os,opts,minD,nearest;
+    if(t==='hide_ui'){
+      v=d.hidden?'none':'';
+      ALL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display=v;});});
+    } else if(t==='hide_controls'){
+      CTRL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display='none';});});
+    } else if(t==='play'){
+      btn=document.getElementById('playBtn'); if(btn&&btn.textContent==='Play')btn.click();
+    } else if(t==='pause'){
+      btn=document.getElementById('playBtn'); if(btn&&btn.textContent==='Pause')btn.click();
+    } else if(t==='reset'){
+      btn=document.getElementById('resetBtn'); if(btn)btn.click();
+    } else if(t==='reset_camera'){
+      btn=document.getElementById('cameraBtn'); if(btn)btn.click();
+    } else if(t==='set_stop'){
+      es=document.getElementById('elevSlider'); as=document.getElementById('azSlider');
+      if(es&&d.elev!=null){es.value=d.elev; es.dispatchEvent(new Event('input'));}
+      if(as&&d.azim!=null){as.value=d.azim; as.dispatchEvent(new Event('input'));}
+    } else if(t==='set_speed'){
+      ss=document.getElementById('speedSelect');
+      if(ss){
+        opts=['0.5','1','2','4']; nearest='1'; minD=Infinity;
+        opts.forEach(function(o){var dv=Math.abs(+o-(+d.speed||1));if(dv<minD){minD=dv;nearest=o;}});
+        ss.value=nearest; ss.dispatchEvent(new Event('change'));
+      }
+    } else if(t==='set_opacity'){
+      os=document.getElementById('opacitySlider');
+      if(os){os.value=Math.round((+d.v||0)*100); os.dispatchEvent(new Event('input'));}
+    }
   });
 })();
 </script>

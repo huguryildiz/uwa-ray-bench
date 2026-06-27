@@ -228,12 +228,12 @@
   #compare-info{margin-left:auto;font:500 10px var(--mono);color:var(--text-dim)}
 
   /* ---------- panel grid ---------- */
-  #grid{flex:none;height:calc(100svh - 236px);min-height:240px;display:grid;
+  #grid{flex:none;height:calc(100svh - 196px);min-height:240px;display:grid;
     position:relative;background:rgba(255,255,255,.04);margin:6px 12px 0;
     border-radius:var(--radius);overflow:hidden;
     border:1px solid var(--border);box-shadow:var(--lift)}
   body.tab-overview #grid{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:3px}
-  body.tab-compare #grid{grid-template-columns:1fr 1fr;grid-template-rows:1fr;height:calc(100svh - 278px)}
+  body.tab-compare #grid{grid-template-columns:1fr 1fr;grid-template-rows:1fr;height:calc(100svh - 238px)}
   body.tab-fugu #grid,body.tab-opus #grid,body.tab-gpt #grid,
   body.tab-gemini #grid,body.tab-reference #grid{
     grid-template-columns:1fr;grid-template-rows:1fr}
@@ -500,11 +500,54 @@
     /* compact always-visible sections on mobile */
     #hero-score{margin:6px 8px 0;padding:8px 12px;gap:10px}
     #hero-bars{gap:12px}
-    #timeline-bar{margin:4px 8px 0;padding:6px 10px}
     #compare-header{margin:4px 8px 0;flex-wrap:wrap;gap:6px}
     #compare-info{display:none}
-    #grid{margin:4px 8px 0;height:calc(100svh - 260px)}
-    body.tab-compare #grid{height:calc(100svh - 302px)}
+    #grid{margin:4px 8px 0;height:calc(100svh - 220px)}
+    body.tab-compare #grid{height:calc(100svh - 262px)}
+  }
+
+  /* ---------- simulation control sidebar ---------- */
+  #sim-ctrl{position:fixed;left:0;top:56px;bottom:0;width:220px;z-index:50;
+    display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;
+    padding:14px 10px 20px;
+    background:rgba(6,8,24,.82);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    border-right:1px solid var(--border);
+    box-shadow:4px 0 32px rgba(0,0,0,.55);}
+  .sc-head{display:flex;align-items:center;gap:7px;padding-bottom:10px;margin-bottom:4px;
+    border-bottom:1px solid var(--border);
+    font:700 9px var(--font);letter-spacing:.18em;text-transform:uppercase;color:var(--accent);}
+  .sc-sec{padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);display:flex;flex-direction:column;gap:5px}
+  .sc-sec:last-child{border-bottom:0}
+  .sc-lbl{font:700 8px var(--font);letter-spacing:.18em;text-transform:uppercase;color:var(--text-faint);margin-bottom:1px}
+  .sc-btn{width:100%;appearance:none;cursor:pointer;border:1px solid var(--border);border-radius:var(--radius-sm);
+    padding:7px 10px;font:600 11px var(--font);color:var(--text-dim);background:rgba(255,255,255,.05);
+    text-align:left;transition:var(--tr);line-height:1.3}
+  .sc-btn:hover{border-color:var(--border-strong);color:var(--text);background:rgba(255,255,255,.09)}
+  .sc-play{text-align:center!important;font-size:12px!important;padding:9px 8px!important;color:var(--accent)!important;
+    border-color:rgba(57,255,133,.22)!important;background:rgba(57,255,133,.07)!important}
+  .sc-play:hover{border-color:rgba(57,255,133,.38)!important;background:rgba(57,255,133,.13)!important;
+    box-shadow:0 0 16px rgba(57,255,133,.14)!important}
+  .sc-canon{color:var(--accent-blue)!important;border-color:rgba(123,140,255,.20)!important;font-size:10px!important;
+    background:rgba(123,140,255,.06)!important}
+  .sc-canon:hover{border-color:rgba(123,140,255,.34)!important;background:rgba(123,140,255,.11)!important}
+  .sc-row2{display:flex;gap:5px}
+  .sc-row2 .sc-btn{flex:1}
+  .sc-field{display:flex;align-items:center;justify-content:space-between;gap:4px;
+    font-size:11px;color:var(--text-dim)}
+  .sc-field>span{flex:0 0 auto;font-size:10px}
+  .sc-rng{width:100%;margin:2px 0;accent-color:var(--accent)}
+  .sc-time{font:400 9px var(--mono);color:var(--text-faint);text-align:center;margin-top:-2px}
+  #main{margin-left:220px;flex:1;display:flex;flex-direction:column;min-width:0}
+  #ctrl-toggle{display:none;align-items:center;justify-content:center;
+    appearance:none;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);
+    cursor:pointer;color:var(--text-dim);padding:5px 9px;font:600 11px var(--font);transition:var(--tr);margin-right:6px}
+  #ctrl-toggle:hover{color:var(--text);border-color:var(--border-strong)}
+  @media(max-width:680px){
+    #main{margin-left:0}
+    #sim-ctrl{transform:translateX(-100%);transition:transform var(--tr)}
+    body.ctrl-open #sim-ctrl{transform:translateX(0)}
+    #ctrl-toggle{display:flex}
   }
 </style>
 </head>
@@ -541,26 +584,7 @@
   <div class="brand"><b>UWA <em>Ray</em> Bench</b></div>
   <button class="lnk" id="hamburger" aria-label="Toggle menu" aria-controls="bar-actions" aria-expanded="false"><span class="ham-ico"></span></button>
   <div id="bar-actions">
-    <button class="lnk" id="play">▶ Play all</button>
-    <button class="lnk" id="reset">⟲ Reset</button>
-    <button class="lnk" id="camreset">⌖ Camera</button>
-    <span class="vsep"></span>
-    <details class="menu" name="navmenu">
-      <summary>Fan</summary>
-      <div class="pop">
-        <div class="r"><span>Elevation × Azimuth beams</span></div>
-        <div class="r"><select class="sel" id="elevsel"></select><span>×</span><select class="sel" id="azimsel"></select></div>
-        <button class="mini" id="canon">Reset to canonical 41×31</button>
-      </div>
-    </details>
-    <details class="menu" name="navmenu">
-      <summary>View</summary>
-      <div class="pop">
-        <label class="r"><span>TL volume</span><input type="checkbox" id="volchk" checked></label>
-        <label class="r"><span>Opacity</span><input type="range" id="opac" min="0" max="1" step="0.02" value="0.5"></label>
-      </div>
-    </details>
-    <span class="vsep"></span>
+    <button id="ctrl-toggle" onclick="document.body.classList.toggle('ctrl-open')" aria-label="Toggle controls">⊟ Controls</button>
     <button class="lnk" id="cinema-btn" title="Hide all panels — show only rays">⊙ Cinema</button>
     <span class="vsep"></span>
     <button class="lnk" id="diffbtn">⊞ Diff overlay</button>
@@ -570,6 +594,48 @@
   <span id="readout">Hover a panel for c(z) · D(x,y)</span>
 </div>
 
+<div id="sim-ctrl">
+  <div class="sc-head">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="22"/><circle cx="5" cy="12" r="3"/><line x1="8" y1="12" x2="22" y2="12"/></svg>
+    Simulation Control
+  </div>
+  <div class="sc-sec">
+    <div class="sc-lbl">Fan Beams</div>
+    <label class="sc-field"><span>Elevation</span><select class="sel" id="elevsel"></select></label>
+    <label class="sc-field"><span>Azimuth</span><select class="sel" id="azimsel"></select></label>
+    <button class="sc-btn sc-canon" id="canon">⊹ Canonical 41×31</button>
+  </div>
+  <div class="sc-sec">
+    <div class="sc-lbl">Playback</div>
+    <div class="sc-row2">
+      <button class="sc-btn sc-play" id="play">▶ Play all</button>
+      <button class="sc-btn" id="reset" title="Reset all">⟲</button>
+    </div>
+    <input type="range" class="sc-rng" id="tl-seek" min="0" max="100" value="0">
+    <div class="sc-time" id="tl-time">— / —</div>
+    <label class="sc-field">
+      <span>Speed</span>
+      <select class="sel" id="tl-speed">
+        <option value="0.25">0.25×</option>
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+      </select>
+    </label>
+  </div>
+  <div class="sc-sec">
+    <div class="sc-lbl">Volume</div>
+    <label class="sc-field"><span>TL volume</span><input type="checkbox" id="volchk" checked></label>
+    <input type="range" class="sc-rng" id="opac" min="0" max="1" step="0.02" value="0.5">
+  </div>
+  <div class="sc-sec">
+    <div class="sc-lbl">Camera</div>
+    <button class="sc-btn" id="camreset">⌖ Reset Camera</button>
+  </div>
+</div>
+
+<div id="main">
 <nav id="tabs-bar">
   <button class="tab-btn act" data-tab="overview">Gallery</button>
   <button class="tab-btn" data-tab="compare">Compare</button>
@@ -584,20 +650,6 @@
     <span class="wb-name" id="winner-name">—</span>
   </div>
 </section>
-
-<div id="timeline-bar">
-  <button id="tl-reset" title="Reset all">⟨◀</button>
-  <button id="tl-play">▶</button>
-  <input type="range" id="tl-seek" min="0" max="100" value="0">
-  <span id="tl-time">— / —</span>
-  <select id="tl-speed">
-    <option value="0.25">0.25×</option>
-    <option value="0.5">0.5×</option>
-    <option value="1" selected>1×</option>
-    <option value="2">2×</option>
-    <option value="4">4×</option>
-  </select>
-</div>
 
 <div id="compare-header">
   <span id="compare-model-lbl">Model</span>
@@ -948,6 +1000,7 @@
 <footer id="foot">© 2026 · Developed by
   <a href="https://huguryildiz.com/" target="_blank" rel="noopener">Hüseyin Uğur Yıldız</a></footer>
 
+</div><!-- /main -->
 <script src="harness.js?v=8"></script>
 </body>
 </html>
