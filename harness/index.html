@@ -513,7 +513,25 @@
     background:rgba(6,8,24,.82);
     backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
     border-right:1px solid var(--border);
-    box-shadow:4px 0 32px rgba(0,0,0,.55);}
+    box-shadow:4px 0 32px rgba(0,0,0,.55);
+    transition:transform var(--tr);}
+  .sc-collapse{margin-left:auto;appearance:none;background:none;border:none;
+    cursor:pointer;color:var(--text-faint);font-size:11px;padding:2px 5px;
+    transition:var(--tr);line-height:1;border-radius:4px}
+  .sc-collapse:hover{color:var(--accent);background:rgba(57,255,133,.08)}
+  .sc-reopen{position:fixed;left:0;top:50%;transform:translateY(-50%);
+    z-index:51;display:none;writing-mode:vertical-rl;
+    appearance:none;background:rgba(6,8,24,.82);
+    border:1px solid var(--border);border-left:0;
+    border-radius:0 var(--radius-sm) var(--radius-sm) 0;
+    color:var(--text-dim);cursor:pointer;padding:10px 6px;
+    font:700 9px var(--font);letter-spacing:.12em;text-transform:uppercase;
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    transition:var(--tr)}
+  .sc-reopen:hover{color:var(--accent);border-color:rgba(57,255,133,.35)}
+  body.sim-collapsed #sim-ctrl{transform:translateX(-220px)}
+  body.sim-collapsed #main{margin-left:0}
+  body.sim-collapsed .sc-reopen{display:flex;align-items:center}
   .sc-head{display:flex;align-items:center;gap:7px;padding-bottom:10px;margin-bottom:4px;
     border-bottom:1px solid var(--border);
     font:700 9px var(--font);letter-spacing:.18em;text-transform:uppercase;color:var(--accent);}
@@ -538,7 +556,7 @@
   .sc-field>span{flex:0 0 auto;font-size:10px}
   .sc-rng{width:100%;margin:2px 0;accent-color:var(--accent)}
   .sc-time{font:400 9px var(--mono);color:var(--text-faint);text-align:center;margin-top:-2px}
-  #main{margin-left:220px;flex:1;display:flex;flex-direction:column;min-width:0}
+  #main{margin-left:220px;flex:1;display:flex;flex-direction:column;min-width:0;transition:margin-left var(--tr)}
   #ctrl-toggle{display:none;align-items:center;justify-content:center;
     appearance:none;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);
     cursor:pointer;color:var(--text-dim);padding:5px 9px;font:600 11px var(--font);transition:var(--tr);margin-right:6px}
@@ -594,10 +612,12 @@
   <span id="readout">Hover a panel for c(z) · D(x,y)</span>
 </div>
 
+<button class="sc-reopen" onclick="document.body.classList.remove('sim-collapsed')" title="Open simulation controls">▶ Controls</button>
 <div id="sim-ctrl">
   <div class="sc-head">
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="22"/><circle cx="5" cy="12" r="3"/><line x1="8" y1="12" x2="22" y2="12"/></svg>
     Simulation Control
+    <button class="sc-collapse" onclick="document.body.classList.add('sim-collapsed')" title="Collapse sidebar">◀</button>
   </div>
   <div class="sc-sec">
     <div class="sc-lbl">Fan Beams</div>
