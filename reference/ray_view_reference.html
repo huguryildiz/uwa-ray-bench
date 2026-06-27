@@ -48,8 +48,12 @@
   html,body{margin:0;height:100%;background:#06060f;overflow:hidden;
     font:12px/1.4 'IBM Plex Sans',system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink)}
   #wrap{position:fixed;inset:0}
-  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #gl,#ov{position:absolute;inset:0;width:100%;height:100%;display:block}
   #gl{z-index:1} #ov{z-index:2;pointer-events:none}
+  #xsect{position:absolute;left:10px;bottom:46px;width:280px;height:170px;z-index:3;
+    border-radius:10px;background:rgba(9,11,30,.75);border:1px solid var(--hair);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    pointer-events:none;display:block}
 
   /* ---- DRAWER (B): right-edge metrics panel ---- */
   #drawer{position:absolute;right:0;top:0;bottom:38px;z-index:3;
@@ -135,6 +139,7 @@
 <div id="wrap">
   <canvas id="gl"></canvas>
   <canvas id="ov"></canvas>
+  <canvas id="xsect"></canvas>
   <!-- B: right-edge metrics drawer -->
   <div id="drawer">
     <div id="drawer-tab">METRICS</div>
@@ -304,6 +309,7 @@ const markBuf=buf(new Float32Array([
 
 /* ========================= per-stop dynamic geometry ========================= */
 let rayGeo=null, volGeo=null, tlField=null, curHdr=null, tMax=1;
+let rayXZ=null; // Float32Array, 9 floats/seg: x1_km,z1_m,x2_km,z2_m,t1,t2,r,g,b
 function hueRGB(h){h=(h%1+1)%1;const k=t=>{const a=Math.abs(((h*6+t)%6)-3)-1;
   return Math.max(0,Math.min(1,a));};return[k(0),k(4),k(2)];} // simple rainbow
 function tlColor(tl){ // 45..115 dB -> warm(loud)->cool/dark(quiet)
@@ -323,24 +329,28 @@ function buildStop(buffer){
   const q=hdr.quant_box_m, deq=(v,lo,hi)=>lo+((v+32767)/65534)*(hi-lo);
 
   // ---- rays -> line segments ----
-  const nr=hdr.n_rays; const pos=[],col=[],tim=[];
+  const nr=hdr.n_rays; const pos=[],col=[],tim=[],xzSegs=[];
   for(let r=0;r<nr;r++){
     const npts=dv.getInt32(off,true);off+=4;
     const xs=new Array(npts),ys=new Array(npts),zs=new Array(npts);
+    const xw=new Array(npts),zw=new Array(npts); // world km / m for cross-section
     for(let p=0;p<npts;p++){
       const qx=dv.getInt16(off,true),qy=dv.getInt16(off+2,true),qz=dv.getInt16(off+4,true);off+=6;
       const xm=deq(qx,q.xmin,q.xmax),ym=deq(qy,q.ymin,q.ymax),zm=deq(qz,q.zmin,q.zmax);
-      const sc=toScene(xm/1000,ym/1000,zm); xs[p]=sc[0];ys[p]=sc[1];zs[p]=sc[2];}
+      const sc=toScene(xm/1000,ym/1000,zm); xs[p]=sc[0];ys[p]=sc[1];zs[p]=sc[2];
+      xw[p]=xm/1000; zw[p]=zm;}
     const ts=new Float32Array(npts);
     for(let p=0;p<npts;p++){ts[p]=dv.getFloat32(off,true);off+=4;}
     const c=hueRGB(0.75*r/Math.max(1,nr-1)); // launch-angle rainbow (index proxy)
     for(let p=0;p<npts-1;p++){
       pos.push(xs[p],ys[p],zs[p], xs[p+1],ys[p+1],zs[p+1]);
-      col.push(c[0],c[1],c[2],c[0],c[1],c[2]); tim.push(ts[p],ts[p+1]);}
+      col.push(c[0],c[1],c[2],c[0],c[1],c[2]); tim.push(ts[p],ts[p+1]);
+      xzSegs.push(xw[p],zw[p],xw[p+1],zw[p+1],ts[p],ts[p+1],c[0],c[1],c[2]);}
     if(ts[npts-1]>tMax)tMax=ts[npts-1];
   }
   rayGeo={pos:buf(new Float32Array(pos)),col:buf(new Float32Array(col)),
     tim:buf(new Float32Array(tim)),n:tim.length};
+  rayXZ=new Float32Array(xzSegs);
 
   // ---- insonified TL volume (point-splat, TL<120) ----
   const vp=[],vc=[]; let ins=0;
@@ -421,6 +431,7 @@ function render(){
   gl.drawArrays(gl.POINTS,0,2);
   gl.disable(gl.BLEND);
   drawOverlay();
+  drawXSection();
 }
 function u(p,n){return gl.getUniformLocation(p,n);}
 function bindA(p,name,b,size,stride,offset){const l=gl.getAttribLocation(p,name);
@@ -467,6 +478,79 @@ function drawOverlay(){
     octx.save();octx.translate(W-38,by+bh/2);octx.rotate(Math.PI/2);
     octx.textAlign='center';octx.fillText('TL (dB)',0,0);octx.restore();}
   octx.restore();
+}
+
+/* ========================= centerline cross-section inset ========================= */
+function drawXSection(){
+  const xc=document.getElementById('xsect');
+  const ctx=xc.getContext('2d');
+  const W=xc.width, H=xc.height;
+  const PAD={l:34,r:6,t:20,b:22};
+  const pw=W-PAD.l-PAD.r, ph=H-PAD.t-PAD.b;
+  ctx.clearRect(0,0,W,H);
+  // title
+  ctx.fillStyle='rgba(155,182,216,.75)';
+  ctx.font='bold 9px "IBM Plex Mono",monospace';
+  ctx.textAlign='left';
+  ctx.fillText('Centerline x-section  y = 12 km  (x–z)',PAD.l,12);
+  // coord helpers
+  const cx=xk=>PAD.l+xk/X_MAX*pw;
+  const cz=zm=>PAD.t+zm/Z_MAX*ph;
+  // bathymetry fill
+  ctx.beginPath();
+  const NSTEP=80;
+  ctx.moveTo(cx(0),cz(bathy(0,12)));
+  for(let i=1;i<=NSTEP;i++){const xk=i/NSTEP*X_MAX; ctx.lineTo(cx(xk),cz(bathy(xk,12)));}
+  ctx.lineTo(cx(X_MAX),cz(Z_MAX)); ctx.lineTo(cx(0),cz(Z_MAX)); ctx.closePath();
+  ctx.fillStyle='rgba(160,120,70,.40)'; ctx.fill();
+  ctx.strokeStyle='rgba(210,170,100,.55)'; ctx.lineWidth=0.8; ctx.stroke();
+  // clip segment against bathy(x,12) floor; binary-search for intersection
+  function clipSeg(x1,z1,x2,z2){
+    const b1=bathy(x1,12),b2=bathy(x2,12);
+    const u1=z1>=b1,u2=z2>=b2;
+    if(u1&&u2) return null;
+    if(!u1&&!u2) return [x1,z1,x2,z2];
+    let ta=0,tb=1;
+    for(let k=0;k<10;k++){const tm=(ta+tb)/2,xm=x1+tm*(x2-x1),zm=z1+tm*(z2-z1);
+      if(zm>=bathy(xm,12)) tb=tm; else ta=tm;}
+    const tc=(ta+tb)/2,xc=x1+tc*(x2-x1),zc=z1+tc*(z2-z1);
+    return u1?[xc,zc,x2,z2]:[x1,z1,xc,zc];
+  }
+  // ray segments (animated: show segments whose t1 <= curTime)
+  if(rayXZ){
+    const n=rayXZ.length/9;
+    for(let i=0;i<n;i++){
+      const o=i*9;
+      if(rayXZ[o+4]>curTime) continue;
+      const seg=clipSeg(rayXZ[o],rayXZ[o+1],rayXZ[o+2],rayXZ[o+3]);
+      if(!seg) continue;
+      const alpha=rayXZ[o+5]<=curTime?0.45:0.75;
+      ctx.strokeStyle=`rgba(${rayXZ[o+6]*255|0},${rayXZ[o+7]*255|0},${rayXZ[o+8]*255|0},${alpha})`;
+      ctx.lineWidth=0.65;
+      ctx.beginPath(); ctx.moveTo(cx(seg[0]),cz(seg[1])); ctx.lineTo(cx(seg[2]),cz(seg[3])); ctx.stroke();
+    }
+  }
+  // axes
+  ctx.strokeStyle='rgba(155,182,216,.35)'; ctx.lineWidth=0.7;
+  ctx.beginPath();
+  ctx.moveTo(PAD.l,PAD.t); ctx.lineTo(PAD.l,PAD.t+ph);
+  ctx.moveTo(PAD.l,PAD.t+ph); ctx.lineTo(PAD.l+pw,PAD.t+ph);
+  ctx.stroke();
+  // tick labels
+  ctx.fillStyle='rgba(155,182,216,.55)'; ctx.font='7.5px "IBM Plex Mono",monospace';
+  ctx.textAlign='center';
+  [0,10,20,30,40,50].forEach(xk=>ctx.fillText(xk,cx(xk),PAD.t+ph+10));
+  ctx.fillText('range (km)',PAD.l+pw/2,PAD.t+ph+20);
+  ctx.textAlign='right';
+  [0,1000,2000,3000].forEach(zm=>ctx.fillText(zm?zm/1000+'k':0,PAD.l-3,cz(zm)+3));
+  // S marker
+  ctx.fillStyle='#ffd36b'; ctx.textAlign='center'; ctx.font='bold 9px sans-serif';
+  ctx.beginPath(); ctx.arc(cx(SRC.x),cz(SRC.z),2.5,0,7); ctx.fill();
+  ctx.fillText('S',cx(SRC.x),cz(SRC.z)-5);
+  // R marker
+  ctx.fillStyle='#9fe8ff';
+  ctx.beginPath(); ctx.arc(cx(RCV.x),cz(RCV.z),2.5,0,7); ctx.fill();
+  ctx.fillText('R',cx(RCV.x),cz(RCV.z)-5);
 }
 
 /* ========================= sizing ========================= */
@@ -583,10 +667,13 @@ addEventListener('message',e=>{const m=e.data||{};switch(m.type){
   case'set_volume': showVol=!!m.on;document.getElementById('volchk').checked=showVol;break;
   case'set_opacity': volOp=+m.v;document.getElementById('opac').value=volOp;break;
   case'request_metrics': postMetrics();break;
+  case'hide_controls': ['#dock','#drawer-tab'].forEach(s=>document.querySelectorAll(s).forEach(el=>el.style.display='none'));break;
 }});
 
 /* ========================= boot ========================= */
 (async()=>{ try{
+  // fix xsect canvas backing-store size (CSS handles display size)
+  const xc=document.getElementById('xsect'); xc.width=280; xc.height=170;
   await loadManifest();
   await loadStop(41,31);
   // drawer starts closed; dock is always visible at bottom

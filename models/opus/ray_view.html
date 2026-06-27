@@ -1030,13 +1030,35 @@ setTimeout(()=>{ STATE=precompute(41,31); pushMetrics(STATE); camDirty=true; pro
 </script>
 <script>
 (function(){
-  var UI_SELS=['#legend','#metrics','#cbar','#xsecWrap','#arrWrap','#controls','.hint'];
+  var CTRL_SELS=['#controls'];
+  var ALL_SELS=['#legend','#metrics','#cbar','#xsecWrap','#arrWrap','#controls','.hint'];
   window.addEventListener('message',function(e){
-    if(!e.data||e.data.type!=='hide_ui')return;
-    var v=e.data.hidden?'none':'';
-    UI_SELS.forEach(function(s){
-      document.querySelectorAll(s).forEach(function(el){el.style.display=v;});
-    });
+    var d=e.data; if(!d)return;
+    var t=d.type,v,btn,es,as,ss,os;
+    if(t==='hide_ui'){
+      v=d.hidden?'none':'';
+      ALL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display=v;});});
+    } else if(t==='hide_controls'){
+      CTRL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display='none';});});
+    } else if(t==='play'){
+      btn=document.getElementById('btnPlay'); if(btn&&btn.textContent.indexOf('Play')>=0)btn.click();
+    } else if(t==='pause'){
+      btn=document.getElementById('btnPlay'); if(btn&&btn.textContent.indexOf('Pause')>=0)btn.click();
+    } else if(t==='reset'){
+      btn=document.getElementById('btnReset'); if(btn)btn.click();
+    } else if(t==='reset_camera'){
+      btn=document.getElementById('btnCam'); if(btn)btn.click();
+    } else if(t==='set_stop'){
+      es=document.getElementById('slEl'); as=document.getElementById('slAz');
+      if(es&&d.elev!=null){es.value=d.elev; es.dispatchEvent(new Event('input'));}
+      if(as&&d.azim!=null){as.value=d.azim; as.dispatchEvent(new Event('input'));}
+    } else if(t==='set_speed'){
+      ss=document.getElementById('slSpd');
+      if(ss){ss.value=Math.min(400,Math.max(10,Math.round((+d.speed||1)*100))); ss.dispatchEvent(new Event('input'));}
+    } else if(t==='set_opacity'){
+      os=document.getElementById('slOp');
+      if(os){os.value=Math.round((+d.v||0)*100); os.dispatchEvent(new Event('input'));}
+    }
   });
 })();
 </script>

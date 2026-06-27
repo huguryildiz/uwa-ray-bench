@@ -791,13 +791,35 @@ setTimeout(() => {
 </script>
 <script>
 (function(){
-  var UI_SELS=['#controls','#metrics','#panel-2d','#panel-arrivals','#cam-hud'];
+  var CTRL_SELS=['#controls'];
+  var ALL_SELS=['#controls','#metrics','#panel-2d','#panel-arrivals','#cam-hud'];
   window.addEventListener('message',function(e){
-    if(!e.data||e.data.type!=='hide_ui')return;
-    var v=e.data.hidden?'none':'';
-    UI_SELS.forEach(function(s){
-      document.querySelectorAll(s).forEach(function(el){el.style.display=v;});
-    });
+    var d=e.data; if(!d)return;
+    var t=d.type,v,btn,es,as,ss,os;
+    if(t==='hide_ui'){
+      v=d.hidden?'none':'';
+      ALL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display=v;});});
+    } else if(t==='hide_controls'){
+      CTRL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display='none';});});
+    } else if(t==='play'){
+      btn=document.getElementById('btn-play'); if(btn&&btn.innerText==='Play')btn.click();
+    } else if(t==='pause'){
+      btn=document.getElementById('btn-play'); if(btn&&btn.innerText==='Pause')btn.click();
+    } else if(t==='reset'){
+      btn=document.getElementById('btn-reset'); if(btn)btn.click();
+    } else if(t==='reset_camera'){
+      btn=document.getElementById('btn-cam'); if(btn)btn.click();
+    } else if(t==='set_stop'){
+      es=document.getElementById('inp-el'); as=document.getElementById('inp-az');
+      if(es&&d.elev!=null)es.value=d.elev;
+      if(as&&d.azim!=null){as.value=d.azim; as.dispatchEvent(new Event('change'));}
+    } else if(t==='set_speed'){
+      ss=document.getElementById('inp-speed');
+      if(ss){ss.value=Math.min(5,Math.max(0.1,+d.speed||1)); ss.dispatchEvent(new Event('input'));}
+    } else if(t==='set_opacity'){
+      os=document.getElementById('inp-opacity');
+      if(os){os.value=Math.min(1,Math.max(0,+d.v||0)); os.dispatchEvent(new Event('input'));}
+    }
   });
 })();
 </script>
