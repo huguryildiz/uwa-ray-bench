@@ -245,8 +245,7 @@ addEventListener('message',e=>{
     case'ready':{ const rid=m.panel||id; if(rid){clearWait(rid);
         send(rid,{type:'set_stop',elev:curStop.elev,azim:curStop.azim});
         if(lastPose)send(rid,{type:'set_camera',pose:lastPose});
-        send(rid,{type:'request_metrics'});
-        if(!playing)send(rid,{type:'pause'});}
+        send(rid,{type:'request_metrics'});}
       break;}
     case'ray_metrics':{ const pid=m.panel||id; if(!pid)break; clearWait(pid);
       normalizeMetrics(m);
