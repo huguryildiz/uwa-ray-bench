@@ -159,12 +159,81 @@
   .tab-btn.act{color:var(--accent);background:rgba(57,255,133,.08);
     text-shadow:0 0 12px rgba(57,255,133,.40)}
 
+  /* ---------- hero scorecard — always visible compact bar charts ---------- */
+  #hero-score{flex:none;margin:10px 12px 0;display:flex;align-items:center;gap:16px;
+    padding:11px 18px;border-radius:var(--radius);
+    background:rgba(8,10,30,.60);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    border:1px solid var(--border);
+    box-shadow:var(--lift-sm),inset 0 1px 0 rgba(255,255,255,.07)}
+  #hero-title{font:700 9px var(--font);letter-spacing:.12em;color:var(--text-dim);
+    text-transform:uppercase;flex:none;white-space:nowrap}
+  #hero-bars{display:flex;gap:20px;align-items:flex-end;flex:1;min-width:0}
+  .hbc{display:flex;flex-direction:column;align-items:center;gap:4px}
+  .hbc-label{font:600 7px var(--font);letter-spacing:.12em;text-transform:uppercase;
+    color:var(--text-faint);white-space:nowrap}
+  .hbc-row{display:flex;align-items:flex-end;gap:3px;height:32px}
+  .hbc-bar{width:8px;border-radius:2px 2px 0 0;min-height:2px;transition:height .5s cubic-bezier(.4,0,.2,1)}
+  #winner-badge{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none;
+    padding:7px 13px;border-radius:var(--radius-sm);
+    border:1px solid rgba(57,255,133,.25);
+    background:rgba(57,255,133,.05)}
+  #winner-badge .wb-tag{font:700 7px var(--font);letter-spacing:.15em;text-transform:uppercase;
+    color:var(--accent);opacity:.65}
+  #winner-badge .wb-name{font:600 13px var(--head);color:var(--accent);
+    text-shadow:0 0 14px rgba(57,255,133,.45)}
+
+  /* ---------- master timeline bar — always visible ---------- */
+  #timeline-bar{flex:none;margin:5px 12px 0;display:flex;align-items:center;gap:8px;
+    padding:7px 14px;border-radius:var(--radius-sm);
+    background:rgba(4,6,20,.50);
+    backdrop-filter:var(--blur-sm);-webkit-backdrop-filter:var(--blur-sm);
+    border:1px solid var(--border)}
+  #tl-play,#tl-reset{font:600 11px var(--mono);color:var(--text);cursor:pointer;
+    padding:4px 10px;border-radius:7px;border:1px solid var(--border);
+    background:rgba(255,255,255,.06);transition:var(--tr)}
+  #tl-play:hover,#tl-reset:hover{border-color:var(--border-strong);color:var(--accent);
+    background:rgba(255,255,255,.10);box-shadow:0 0 14px rgba(57,255,133,.14)}
+  #tl-play.active{color:var(--accent);border-color:rgba(57,255,133,.38);
+    background:rgba(57,255,133,.09);box-shadow:0 0 14px rgba(57,255,133,.18)}
+  #tl-seek{-webkit-appearance:none;appearance:none;height:3px;flex:1;border-radius:3px;
+    background:rgba(255,255,255,.12);outline:none;cursor:pointer}
+  #tl-seek::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+    background:#d8fff0;box-shadow:0 0 8px rgba(57,255,133,.7);cursor:pointer}
+  #tl-time{font:500 10px var(--mono);color:var(--text-dim);white-space:nowrap;min-width:70px}
+  #tl-speed{appearance:none;font:500 10px var(--mono);color:var(--text);cursor:pointer;
+    padding:4px 22px 4px 9px;border-radius:7px;
+    border:1px solid var(--border);background:rgba(255,255,255,.06);
+    background-image:linear-gradient(45deg,transparent 50%,var(--text-dim) 50%),
+      linear-gradient(135deg,var(--text-dim) 50%,transparent 50%);
+    background-position:calc(100% - 11px) 52%,calc(100% - 7px) 52%;
+    background-size:4px 4px;background-repeat:no-repeat}
+  #tl-speed option{background:#080c22;color:var(--text)}
+
+  /* ---------- compare header — visible only in compare tab ---------- */
+  #compare-header{display:none;flex:none;margin:5px 12px 0;align-items:center;gap:10px;
+    padding:7px 14px;border-radius:var(--radius-sm);
+    background:rgba(8,10,28,.45);
+    backdrop-filter:var(--blur-sm);-webkit-backdrop-filter:var(--blur-sm);
+    border:1px solid var(--border)}
+  body.tab-compare #compare-header{display:flex}
+  #compare-model-lbl{font:700 8px var(--font);letter-spacing:.13em;text-transform:uppercase;
+    color:var(--text-dim);white-space:nowrap}
+  #compare-model.sel{width:auto}
+  #delta-btn{font:600 10px var(--font);color:var(--text-dim);cursor:pointer;
+    padding:4px 11px;border-radius:7px;border:1px solid var(--border);
+    background:rgba(255,255,255,.06);transition:var(--tr)}
+  #delta-btn:hover,#delta-btn.on{color:var(--accent-blue);border-color:rgba(123,140,255,.38);
+    background:rgba(123,140,255,.09)}
+  #compare-info{margin-left:auto;font:500 10px var(--mono);color:var(--text-dim)}
+
   /* ---------- panel grid ---------- */
-  #grid{flex:none;height:calc(100vh - 132px);min-height:320px;display:grid;
-    position:relative;background:rgba(255,255,255,.04);margin:0 12px;
+  #grid{flex:none;height:calc(100svh - 236px);min-height:240px;display:grid;
+    position:relative;background:rgba(255,255,255,.04);margin:6px 12px 0;
     border-radius:var(--radius);overflow:hidden;
     border:1px solid var(--border);box-shadow:var(--lift)}
   body.tab-overview #grid{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:3px}
+  body.tab-compare #grid{grid-template-columns:1fr 1fr;grid-template-rows:1fr;height:calc(100svh - 278px)}
   body.tab-fugu #grid,body.tab-opus #grid,body.tab-gpt #grid,
   body.tab-gemini #grid,body.tab-reference #grid{
     grid-template-columns:1fr;grid-template-rows:1fr}
@@ -177,7 +246,10 @@
   body.tab-reference .cell:not([data-id="reference"]),
   body.tab-scorecard .cell{
     position:absolute;top:0;left:-9999px;width:1px;height:1px;overflow:hidden;box-shadow:none}
+  body.tab-compare .cell:not(.compare-active):not([data-id="reference"]){
+    position:absolute;top:0;left:-9999px;width:1px;height:1px;overflow:hidden;box-shadow:none}
   body.tab-overview .cell iframe{width:200%;height:200%;transform:scale(0.5);transform-origin:0 0}
+  body.tab-compare .cell iframe{width:100%;height:100%;transform:none}
 
   .focus-overlay{position:absolute;inset:0;z-index:8;cursor:zoom-in;display:none;
     transition:background var(--tr)}
@@ -420,6 +492,14 @@
     /* diff modal fits the viewport */
     #diffbox{padding:18px 16px 16px;max-width:94vw}
     #diffcanvas{width:100%;max-width:100%;height:auto}
+    /* compact always-visible sections on mobile */
+    #hero-score{margin:6px 8px 0;padding:8px 12px;gap:10px}
+    #hero-bars{gap:12px}
+    #timeline-bar{margin:4px 8px 0;padding:6px 10px}
+    #compare-header{margin:4px 8px 0;flex-wrap:wrap;gap:6px}
+    #compare-info{display:none}
+    #grid{margin:4px 8px 0;height:calc(100svh - 260px)}
+    body.tab-compare #grid{height:calc(100svh - 302px)}
   }
 </style>
 </head>
@@ -484,14 +564,45 @@
 </div>
 
 <nav id="tabs-bar">
-  <button class="tab-btn act" data-tab="overview">Overview</button>
-  <button class="tab-btn" data-tab="fugu">Fugu</button>
-  <button class="tab-btn" data-tab="opus">Opus</button>
-  <button class="tab-btn" data-tab="gpt">GPT</button>
-  <button class="tab-btn" data-tab="gemini">Gemini</button>
-  <button class="tab-btn" data-tab="reference">Reference</button>
+  <button class="tab-btn act" data-tab="overview">Gallery</button>
+  <button class="tab-btn" data-tab="compare">Compare</button>
   <button class="tab-btn" data-tab="scorecard">Scorecard</button>
 </nav>
+
+<section id="hero-score">
+  <span id="hero-title">Benchmark</span>
+  <div id="hero-bars"></div>
+  <div id="winner-badge">
+    <span class="wb-tag">★ leader</span>
+    <span class="wb-name" id="winner-name">—</span>
+  </div>
+</section>
+
+<div id="timeline-bar">
+  <button id="tl-reset" title="Reset all">⟨◀</button>
+  <button id="tl-play">▶</button>
+  <input type="range" id="tl-seek" min="0" max="100" value="0">
+  <span id="tl-time">— / —</span>
+  <select id="tl-speed">
+    <option value="0.25">0.25×</option>
+    <option value="0.5">0.5×</option>
+    <option value="1" selected>1×</option>
+    <option value="2">2×</option>
+    <option value="4">4×</option>
+  </select>
+</div>
+
+<div id="compare-header">
+  <span id="compare-model-lbl">Model</span>
+  <select class="sel" id="compare-model">
+    <option value="fugu">Sakana Fugu Ultra</option>
+    <option value="opus">Opus 4.8 (max)</option>
+    <option value="gpt">GPT 5.5 (XH)</option>
+    <option value="gemini">Gemini 3.1 Pro</option>
+  </select>
+  <button id="delta-btn">⊞ Δ TL Overlay</button>
+  <span id="compare-info">vs BELLHOP3D reference</span>
+</div>
 
 <div id="grid">
   <div class="cell" data-id="fugu">
@@ -830,6 +941,6 @@
 <footer id="foot">© 2026 · Developed by
   <a href="https://huguryildiz.com/" target="_blank" rel="noopener">Hüseyin Uğur Yıldız</a></footer>
 
-<script src="harness.js?v=7"></script>
+<script src="harness.js?v=8"></script>
 </body>
 </html>

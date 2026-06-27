@@ -31,7 +31,7 @@ const bathy=(xk,yk)=> 2500
 /* ---- panel registry: iframe + contentWindow ---- */
 const iframes={}, metrics={}, scores={};
 let focusId=null, curStop={elev:41,azim:31};
-let curTab='overview';
+let curTab='overview', curCompareModel='fugu';
 document.querySelectorAll('iframe[data-id]').forEach(f=>{iframes[f.dataset.id]=f;});
 function winOf(id){return iframes[id]&&iframes[id].contentWindow;}
 function idOfWindow(w){for(const p of PANELS)if(winOf(p.id)===w)return p.id;return null;}
@@ -43,12 +43,32 @@ function switchTab(name){
   document.body.className='tab-'+name;
   document.querySelectorAll('.tab-btn').forEach(b=>
     b.classList.toggle('act',b.dataset.tab===name));
-  const active=name==='overview'?[...MODELS]:
-    MODELS.includes(name)?[name]:name==='reference'?['reference']:[];
+  let active;
+  if(name==='overview') active=[...MODELS];
+  else if(name==='compare') active=[curCompareModel,'reference'];
+  else if(MODELS.includes(name)) active=[name];
+  else if(name==='reference') active=['reference'];
+  else active=[];
   PANELS.forEach(p=>{
-    if(active.includes(p.id)){send(p.id,{type:playing?'play':'pause'});}
-    else send(p.id,{type:'pause'});
+    send(p.id,{type:active.includes(p.id)?(playing?'play':'pause'):'pause'});
   });
+}
+function setCompareModel(id){
+  curCompareModel=id;
+  document.querySelectorAll('.cell').forEach(c=>
+    c.classList.toggle('compare-active',c.dataset.id===id));
+  const sel=document.getElementById('compare-model');
+  if(sel&&sel.value!==id)sel.value=id;
+  if(curTab==='compare'){
+    PANELS.forEach(p=>send(p.id,{type:(p.id===id||p.id==='reference')?(playing?'play':'pause'):'pause'}));
+  }
+  updateCompareInfo();
+}
+function updateCompareInfo(){
+  const el=document.getElementById('compare-info'); if(!el)return;
+  const s=scores[curCompareModel];
+  if(!s){el.textContent='vs BELLHOP3D reference';return;}
+  el.textContent=`RMSE ${fmt(s.rmse)} dB · TL(R) err ${fmt(s.tlRerr,1)} dB  ·  vs BELLHOP3D`;
 }
 
 /* ---- normalise non-standard field names from model panels ---- */
@@ -119,7 +139,7 @@ function scoreModel(id){
     canonical: !!m.canonical,
   };
 }
-function recompute(){ MODELS.forEach(id=>{scores[id]=scoreModel(id);}); renderScore(); if(diffOpen)drawDiff(); }
+function recompute(){ MODELS.forEach(id=>{scores[id]=scoreModel(id);}); renderScore(); renderHero(); if(diffOpen)drawDiff(); }
 
 /* ---- scorecard table ---- */
 function fmt(v,d=2){return v==null||!isFinite(v)?'—':(+v).toFixed(d);}
@@ -303,6 +323,45 @@ function setReadout(w){
     `c(z)=<b>${c.toFixed(1)}</b>m/s &nbsp; D(x,y)=<b>${D.toFixed(0)}</b>m`;
 }
 
+/* ---- hero scorecard bar charts (always-visible compact section) ---- */
+const HERO_H=32;
+const HERO_DEFS=[
+  {label:'TL RMSE',  get:id=>scores[id]?.rmse},
+  {label:'Core RMSE',get:id=>scores[id]?.coreRmse},
+  {label:'TL(R) err',get:id=>scores[id]?.tlRerr},
+  {label:'Insonif%', get:id=>metrics[id]?.insonified!=null?metrics[id].insonified*100:null},
+];
+function renderHero(){
+  const el=document.getElementById('hero-bars'); if(!el)return;
+  let out='';
+  for(const d of HERO_DEFS){
+    const vals=MODELS.map(id=>({id,v:d.get(id)}));
+    const nums=vals.map(x=>x.v).filter(v=>v!=null&&isFinite(v));
+    const mx=nums.length?Math.max(...nums):0;
+    let cols='';
+    for(const {id,v} of vals){
+      const h=mx>0&&v!=null?Math.max(Math.round(v/mx*HERO_H),2):2;
+      const c=MODEL_CLRS[id];
+      cols+=`<div class="hbc-bar" style="height:${h}px;background:${c};box-shadow:0 0 5px ${c}88" title="${MODEL_SHORT[id]}: ${fmt(v)}"></div>`;
+    }
+    out+=`<div class="hbc"><div class="hbc-row">${cols}</div><div class="hbc-label">${d.label}</div></div>`;
+  }
+  el.innerHTML=out;
+  let winId=null,winV=Infinity;
+  for(const id of MODELS){
+    const v=scores[id]?.coreRmse;
+    if(v!=null&&isFinite(v)&&v<winV){winV=v;winId=id;}
+  }
+  const nm=document.getElementById('winner-name');
+  const badge=document.getElementById('winner-badge');
+  if(nm){
+    nm.textContent=winId?PANELS.find(p=>p.id===winId).name:'—';
+    if(winId){nm.style.color=MODEL_CLRS[winId];nm.style.textShadow=`0 0 14px ${MODEL_CLRS[winId]}88`;}
+  }
+  if(badge&&winId){badge.style.borderColor=`${MODEL_CLRS[winId]}44`;}
+  updateCompareInfo();
+}
+
 /* ---- top-bar controls ---- */
 function buildSelectors(stops){
   const es=document.getElementById('elevsel'), as=document.getElementById('azimsel');
@@ -313,18 +372,46 @@ function buildSelectors(stops){
   as.onchange=()=>setStop(curStop.elev,as.value);
   MODELS.forEach(id=>document.getElementById('diffmodel').add(new Option(PANELS.find(p=>p.id===id).name,id)));
 }
-document.getElementById('play').onclick=()=>{playing=!playing;
-  document.getElementById('play').textContent=playing?'❚❚ Pause all':'▶ Play all';
-  broadcast({type:playing?'play':'pause'});};
-document.getElementById('reset').onclick=()=>{playing=false;
-  document.getElementById('play').textContent='▶ Play all';broadcast({type:'reset'});};
+function syncPlayUI(){
+  const tlBtn=document.getElementById('tl-play');
+  const barBtn=document.getElementById('play');
+  if(tlBtn){tlBtn.classList.toggle('active',playing);tlBtn.textContent=playing?'❚❚':'▶';}
+  if(barBtn)barBtn.textContent=playing?'❚❚ Pause all':'▶ Play all';
+}
+document.getElementById('play').onclick=()=>{playing=!playing;syncPlayUI();broadcast({type:playing?'play':'pause'});};
+document.getElementById('reset').onclick=()=>{playing=false;syncPlayUI();
+  const s=document.getElementById('tl-seek');if(s)s.value=0;
+  broadcast({type:'reset'});};
 document.getElementById('camreset').onclick=()=>{lastPose={yaw:1.0,pitch:0.72,dist:3.3};
   broadcast({type:'set_camera',pose:lastPose});};
 document.getElementById('canon').onclick=()=>setStop(41,31);
 document.getElementById('volchk').onchange=e=>broadcast({type:'set_volume',on:e.target.checked});
 document.getElementById('opac').oninput=e=>broadcast({type:'set_opacity',v:+e.target.value});
 document.querySelectorAll('.tab-btn').forEach(btn=>{btn.onclick=()=>switchTab(btn.dataset.tab);});
-document.querySelectorAll('.focus-overlay').forEach(ov=>{ov.onclick=()=>switchTab(ov.dataset.focus);});
+document.querySelectorAll('.focus-overlay').forEach(ov=>{
+  ov.onclick=()=>{
+    const fid=ov.dataset.focus;
+    if(MODELS.includes(fid)){setCompareModel(fid);switchTab('compare');}
+    else switchTab(fid);
+  };
+});
+
+/* ---- timeline bar ---- */
+document.getElementById('tl-play').onclick=()=>{playing=!playing;syncPlayUI();broadcast({type:playing?'play':'pause'});};
+document.getElementById('tl-reset').onclick=()=>{playing=false;syncPlayUI();
+  const s=document.getElementById('tl-seek');if(s)s.value=0;
+  broadcast({type:'reset'});};
+document.getElementById('tl-speed').onchange=e=>broadcast({type:'set_speed',speed:+e.target.value});
+
+/* ---- compare panel ---- */
+document.getElementById('compare-model').onchange=e=>setCompareModel(e.target.value);
+document.getElementById('delta-btn').onclick=e=>{
+  const on=e.target.classList.toggle('on');
+  diffOpen=on;
+  document.getElementById('diff').classList.toggle('show',on);
+  document.getElementById('diffbtn').classList.toggle('on',on);
+  if(on)drawDiff();
+};
 
 
 document.getElementById('scorebtn').onclick=()=>switchTab('scorecard');
@@ -374,5 +461,7 @@ document.getElementById('diffmodel').onchange=drawDiff;
 
 /* ---- boot ---- */
 buildSelectors({elev:[11,21,41,61,81], azim:[9,16,31,46,61]});
+setCompareModel('fugu');
 renderScore();
+renderHero();
 setTimeout(()=>broadcast({type:'request_metrics'}),1500);
