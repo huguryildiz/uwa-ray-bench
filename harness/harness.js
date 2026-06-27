@@ -125,13 +125,46 @@ function recompute(){ MODELS.forEach(id=>{scores[id]=scoreModel(id);}); renderSc
 function fmt(v,d=2){return v==null||!isFinite(v)?'—':(+v).toFixed(d);}
 function renderScore(){
   const rows=[];
-  rows.push(`<tr><th>panel</th><th>TL RMSE</th><th>core RMSE</th><th>TL(R)</th>`+
-    `<th>TL(R) err</th><th>recip</th><th>conv ΔTL(R)</th><th>insonif%</th><th>|Δy| 3D</th><th>FPS</th></tr>`);
-  // best (lowest) core RMSE among models that reported
-  let bestId=null,bestV=Infinity;
-  MODELS.forEach(id=>{const s=scores[id]; if(s&&s.coreRmse!=null&&s.coreRmse<bestV){bestV=s.coreRmse;bestId=id;}});
+  const refTlR=metrics.reference?.tl_R??null;
+  const refInson=metrics.reference?.insonified!=null?metrics.reference.insonified*100:null;
+  // per-column winner detection (canonical panels only)
+  const COLS=[
+    {key:'rmse',    dir:'low',     get:id=>scores[id]?.rmse},
+    {key:'core',    dir:'low',     get:id=>scores[id]?.coreRmse},
+    {key:'tlR',     dir:'nearest', ref:refTlR, get:id=>metrics[id]?.tl_R},
+    {key:'tlRerr',  dir:'low',     get:id=>scores[id]?.tlRerr},
+    {key:'recip',   dir:'low',     get:id=>metrics[id]?.reciprocity},
+    {key:'conv',    dir:'low',     get:id=>metrics[id]?.conv_tlR},
+    {key:'insonif', dir:'nearest', ref:refInson, get:id=>metrics[id]?.insonified!=null?metrics[id].insonified*100:null},
+    {key:'oop',     dir:'high',    get:id=>metrics[id]?.out_of_plane},
+    {key:'fps',     dir:'high',    get:id=>metrics[id]?.fps},
+  ];
+  const winners={};
+  for(const col of COLS){
+    let wId=null,wV=null;
+    for(const id of MODELS){
+      if(scores[id]?.canonical===false)continue;
+      const v=col.get(id);
+      if(v==null||!isFinite(v))continue;
+      if(wId===null){wId=id;wV=v;continue;}
+      const better=col.dir==='low'?v<wV:col.dir==='high'?v>wV:Math.abs(v-(col.ref??0))<Math.abs(wV-(col.ref??0));
+      if(better){wId=id;wV=v;}
+    }
+    if(wId)winners[col.key]=wId;
+  }
+  const DI={low:'↓',high:'↑',nearest:'≈'};
+  const TITLES={low:'lower is better',high:'higher is better',nearest:'nearest to reference'};
+  const HLBLS=['TL RMSE','core RMSE','TL(R)','TL(R) err','recip','conv ΔTL(R)','insonif%','|Δy| 3D','FPS'];
+  rows.push(`<tr><th>panel</th>`+
+    COLS.map((c,i)=>`<th title="${TITLES[c.dir]}">${HLBLS[i]}`+
+      ` <span style="opacity:.4;font-size:9px;font-weight:400">${DI[c.dir]}</span></th>`).join('')+`</tr>`);
+  function wcell(key,id,content){
+    if(winners[key]!==id)return`<td>${content}</td>`;
+    const clr=MODEL_CLRS[id];
+    return`<td style="color:${clr};text-shadow:0 0 10px ${clr}55;background:${clr}1a;border-radius:5px;font-weight:600">${content}</td>`;
+  }
   PANELS.forEach(p=>{
-    const m=metrics[p.id], s=scores[p.id];
+    const m=metrics[p.id],s=scores[p.id];
     if(p.id==='reference'){
       if(!m){rows.push(`<tr class="refrow"><td>${p.name} (ref)</td><td colspan="9" style="text-align:left;color:#65809f">loading…</td></tr>`);return;}
       rows.push(`<tr class="refrow"><td>${p.name} (ref)</td><td>0.00</td><td>0.00</td>`+
@@ -141,17 +174,17 @@ function renderScore(){
       return;
     }
     if(!m){rows.push(`<tr><td>${p.name}</td><td colspan="9" style="text-align:left;color:#65809f">no panel / no metrics yet</td></tr>`);return;}
-    const best=(p.id===bestId)?' class="best"':'';
-    rows.push(`<tr${p.id===bestId?' class="leader"':''}><td>${p.name}${m.canonical===false?' <span class="pill-off">OFF-CANON</span>':''}</td>`+
-      `<td${best}>${s?fmt(s.rmse):'—'}</td>`+
-      `<td${best}>${s?fmt(s.coreRmse):'—'}</td>`+
-      `<td>${fmt(m.tl_R,1)}</td>`+
-      `<td>${s&&s.tlRerr!=null?fmt(s.tlRerr,1):'—'}</td>`+
-      `<td>${m.reciprocity!=null?fmt(m.reciprocity,1):'—'}</td>`+
-      `<td>${m.conv_tlR!=null?fmt(m.conv_tlR,1):'—'}</td>`+
-      `<td>${m.insonified!=null?fmt(m.insonified*100,1):'—'}</td>`+
-      `<td>${m.out_of_plane!=null?fmt(m.out_of_plane/1000,1)+'km':'—'}</td>`+
-      `<td>${m.fps!=null?fmt(m.fps,0):'—'}</td></tr>`);
+    rows.push(`<tr><td>${p.name}${m.canonical===false?' <span class="pill-off">OFF-CANON</span>':''}</td>`+
+      wcell('rmse',p.id,s?fmt(s.rmse):'—')+
+      wcell('core',p.id,s?fmt(s.coreRmse):'—')+
+      wcell('tlR',p.id,fmt(m.tl_R,1))+
+      wcell('tlRerr',p.id,s&&s.tlRerr!=null?fmt(s.tlRerr,1):'—')+
+      wcell('recip',p.id,m.reciprocity!=null?fmt(m.reciprocity,1):'—')+
+      wcell('conv',p.id,m.conv_tlR!=null?fmt(m.conv_tlR,1):'—')+
+      wcell('insonif',p.id,m.insonified!=null?fmt(m.insonified*100,1):'—')+
+      wcell('oop',p.id,m.out_of_plane!=null?fmt(m.out_of_plane/1000,1)+'km':'—')+
+      wcell('fps',p.id,m.fps!=null?fmt(m.fps,0):'—')+
+      `</tr>`);
   });
   document.getElementById('scoretbl').innerHTML=rows.join('');
   renderBars();
