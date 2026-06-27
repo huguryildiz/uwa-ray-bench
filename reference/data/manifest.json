@@ -1,0 +1,251 @@
+{
+  "canonical": "41x31",
+  "freq_hz": 50.0,
+  "grid": {
+    "nx": 101,
+    "ny": 49,
+    "nz": 31,
+    "order": "x-fastest"
+  },
+  "elev_stops": [
+    11,
+    21,
+    41,
+    61,
+    81
+  ],
+  "azim_stops": [
+    9,
+    16,
+    31,
+    46,
+    61
+  ],
+  "stops": [
+    {
+      "stop": "11x9",
+      "freq_hz": 50.0,
+      "file": "11x9.bin",
+      "bytes": 733867,
+      "n_rays": 99,
+      "tl_R_dB": 89.24,
+      "insonified_frac": 0.5749
+    },
+    {
+      "stop": "11x16",
+      "freq_hz": 50.0,
+      "file": "11x16.bin",
+      "bytes": 826962,
+      "n_rays": 176,
+      "tl_R_dB": 86.97,
+      "insonified_frac": 0.5292
+    },
+    {
+      "stop": "11x31",
+      "freq_hz": 50.0,
+      "file": "11x31.bin",
+      "bytes": 1026447,
+      "n_rays": 341,
+      "tl_R_dB": 83.33,
+      "insonified_frac": 0.5029
+    },
+    {
+      "stop": "11x46",
+      "freq_hz": 50.0,
+      "file": "11x46.bin",
+      "bytes": 1225932,
+      "n_rays": 506,
+      "tl_R_dB": 84.95,
+      "insonified_frac": 0.5005
+    },
+    {
+      "stop": "11x61",
+      "freq_hz": 50.0,
+      "file": "11x61.bin",
+      "bytes": 1425417,
+      "n_rays": 671,
+      "tl_R_dB": 81.89,
+      "insonified_frac": 0.4984
+    },
+    {
+      "stop": "21x9",
+      "freq_hz": 50.0,
+      "file": "21x9.bin",
+      "bytes": 842678,
+      "n_rays": 189,
+      "tl_R_dB": 91.56,
+      "insonified_frac": 0.5717
+    },
+    {
+      "stop": "21x16",
+      "freq_hz": 50.0,
+      "file": "21x16.bin",
+      "bytes": 1020402,
+      "n_rays": 336,
+      "tl_R_dB": 82.31,
+      "insonified_frac": 0.524
+    },
+    {
+      "stop": "21x31",
+      "freq_hz": 50.0,
+      "file": "21x31.bin",
+      "bytes": 1401237,
+      "n_rays": 651,
+      "tl_R_dB": 80.36,
+      "insonified_frac": 0.4924
+    },
+    {
+      "stop": "21x46",
+      "freq_hz": 50.0,
+      "file": "21x46.bin",
+      "bytes": 1782072,
+      "n_rays": 966,
+      "tl_R_dB": 80.9,
+      "insonified_frac": 0.484
+    },
+    {
+      "stop": "21x61",
+      "freq_hz": 50.0,
+      "file": "21x61.bin",
+      "bytes": 2162908,
+      "n_rays": 1281,
+      "tl_R_dB": 78.59,
+      "insonified_frac": 0.4826
+    },
+    {
+      "stop": "41x9",
+      "freq_hz": 50.0,
+      "file": "41x9.bin",
+      "bytes": 1060298,
+      "n_rays": 369,
+      "tl_R_dB": 95.0,
+      "insonified_frac": 0.5702
+    },
+    {
+      "stop": "41x16",
+      "freq_hz": 50.0,
+      "file": "41x16.bin",
+      "bytes": 1407282,
+      "n_rays": 656,
+      "tl_R_dB": 84.63,
+      "insonified_frac": 0.5222
+    },
+    {
+      "stop": "41x31",
+      "freq_hz": 50.0,
+      "file": "41x31.bin",
+      "bytes": 2150818,
+      "n_rays": 1271,
+      "tl_R_dB": 82.62,
+      "insonified_frac": 0.4854
+    },
+    {
+      "stop": "41x46",
+      "freq_hz": 50.0,
+      "file": "41x46.bin",
+      "bytes": 2894353,
+      "n_rays": 1886,
+      "tl_R_dB": 82.1,
+      "insonified_frac": 0.4749
+    },
+    {
+      "stop": "41x61",
+      "freq_hz": 50.0,
+      "file": "41x61.bin",
+      "bytes": 3637888,
+      "n_rays": 2501,
+      "tl_R_dB": 80.38,
+      "insonified_frac": 0.4728
+    },
+    {
+      "stop": "61x9",
+      "freq_hz": 50.0,
+      "file": "61x9.bin",
+      "bytes": 1277918,
+      "n_rays": 549,
+      "tl_R_dB": 93.48,
+      "insonified_frac": 0.5744
+    },
+    {
+      "stop": "61x16",
+      "freq_hz": 50.0,
+      "file": "61x16.bin",
+      "bytes": 1794162,
+      "n_rays": 976,
+      "tl_R_dB": 84.92,
+      "insonified_frac": 0.5258
+    },
+    {
+      "stop": "61x31",
+      "freq_hz": 50.0,
+      "file": "61x31.bin",
+      "bytes": 2900398,
+      "n_rays": 1891,
+      "tl_R_dB": 83.41,
+      "insonified_frac": 0.4903
+    },
+    {
+      "stop": "61x46",
+      "freq_hz": 50.0,
+      "file": "61x46.bin",
+      "bytes": 4006633,
+      "n_rays": 2806,
+      "tl_R_dB": 82.24,
+      "insonified_frac": 0.4783
+    },
+    {
+      "stop": "61x61",
+      "freq_hz": 50.0,
+      "file": "61x61.bin",
+      "bytes": 5112868,
+      "n_rays": 3721,
+      "tl_R_dB": 80.78,
+      "insonified_frac": 0.4773
+    },
+    {
+      "stop": "81x9",
+      "freq_hz": 50.0,
+      "file": "81x9.bin",
+      "bytes": 1495538,
+      "n_rays": 729,
+      "tl_R_dB": 96.8,
+      "insonified_frac": 0.5673
+    },
+    {
+      "stop": "81x16",
+      "freq_hz": 50.0,
+      "file": "81x16.bin",
+      "bytes": 2181043,
+      "n_rays": 1296,
+      "tl_R_dB": 82.7,
+      "insonified_frac": 0.5193
+    },
+    {
+      "stop": "81x31",
+      "freq_hz": 50.0,
+      "file": "81x31.bin",
+      "bytes": 3649978,
+      "n_rays": 2511,
+      "tl_R_dB": 81.16,
+      "insonified_frac": 0.4828
+    },
+    {
+      "stop": "81x46",
+      "freq_hz": 50.0,
+      "file": "81x46.bin",
+      "bytes": 5118913,
+      "n_rays": 3726,
+      "tl_R_dB": 79.96,
+      "insonified_frac": 0.4706
+    },
+    {
+      "stop": "81x61",
+      "freq_hz": 50.0,
+      "file": "81x61.bin",
+      "bytes": 6587848,
+      "n_rays": 4941,
+      "tl_R_dB": 78.62,
+      "insonified_frac": 0.4682
+    }
+  ]
+}

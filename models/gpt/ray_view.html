@@ -1,0 +1,2437 @@
+<!doctype html>
+<!--
+ASSUMPTIONS AND NUMERICAL MODEL
+- Canonical launch fan: elevation -20..+20 deg with 41 beams, azimuth -15..+15 deg with 31 beams, total 1271 rays.
+- Live sliders can change only the elevation and azimuth beam counts. Scenario geometry, SSP, bathymetry, source, receiver, and launch limits stay fixed.
+- Ray integration: arclength Euler steps of 120 m, with direction renormalization each step. Refraction uses dT/ds = -grad(ln c) + T(T.grad(ln c)), so rays bend toward lower sound speed.
+- Surface reflection: pressure-release surface z=0, specular with no energy loss.
+- Seabed reflection: specular reflection about the local 3D bathymetry normal of z-D(x,y)=0. A constant 3.0 dB loss per seabed bounce is used as a light half-space approximation for c=1600 m/s, rho=1.8 g/cc, alpha=0.5 dB/lambda at representative grazing angles.
+- Transmission loss: geometric-spreading ray-tube approximation, TL = 20 log10(path length in m) + boundary losses. Full wave, diffraction, phase, and caustic corrections are not implemented; path length is clamped at 1 m so caustics stay finite.
+- TL comparison grid / voxel mask: 101 x 49 x 31 nodes over x=0..50 km, y=0..24 km, z=0..3000 m, row-major x-fastest. A grid node is reached when a traced sample passes within 650 m; the deposited TL includes a small near-cell distance penalty.
+- Shadow cutoff: a voxel is "shadow" when TL > 112 dB or no ray deposits energy to that node.
+- Receiver eigenray tolerance: a traced ray connects S to R when its closest approach is <= 250 m. The reported arrival time and TL use the closest sampled segment.
+- Reciprocity check: re-traces a fan centered from R back toward S and compares the best TL at S to the canonical S-to-R best TL.
+- Convergence check: re-traces at 82 x 62 beams on the same TL grid and reports changes in insonified fraction and TL(R). It is a geometric-ray convergence check, not a Bellhop comparison.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3D Ocean Acoustic Ray View</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      color-scheme: dark;
+      --panel: rgba(6, 14, 24, 0.58);
+      --panel-strong: rgba(5, 12, 22, 0.82);
+      --line: rgba(143, 211, 232, 0.28);
+      --text: #e8f8ff;
+      --muted: #9dc8d4;
+      --cyan: #52e4ff;
+      --green: #6dff9d;
+      --red: #ff5b6c;
+      --sand: #b5aa69;
+      --status-clearance: 72px;
+      --metrics-max-height: none;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #020713;
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    #app {
+      position: fixed;
+      inset: 0;
+      background: #020713;
+    }
+
+    #scene {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    #scene:active {
+      cursor: grabbing;
+    }
+
+    .topbar {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      display: grid;
+      grid-template-columns: minmax(320px, 720px) minmax(250px, 320px);
+      gap: 8px;
+      align-items: start;
+      justify-content: space-between;
+      pointer-events: none;
+    }
+
+    .panel {
+      pointer-events: auto;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(9, 26, 41, 0.68), var(--panel));
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(10px);
+      border-radius: 8px;
+    }
+
+    .panel-toggle {
+      width: 24px;
+      min-width: 24px;
+      height: 24px;
+      min-height: 24px;
+      padding: 0;
+      border-radius: 7px;
+      color: #bff3ff;
+      font: 900 14px/1 ui-sans-serif, system-ui, sans-serif;
+    }
+
+    .is-minimized {
+      width: max-content;
+      min-width: 0;
+      max-width: none;
+      padding: 6px;
+    }
+
+    .is-minimized .minimizable-body {
+      display: none;
+    }
+
+    .controls {
+      padding: 6px;
+      display: flex;
+      gap: 6px;
+      align-items: flex-start;
+    }
+
+    .controls.is-minimized {
+      width: max-content;
+    }
+
+    .controls-body {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(0, auto));
+      gap: 6px;
+      align-items: center;
+    }
+
+    .controls.is-minimized .controls-body {
+      display: none;
+    }
+
+    button,
+    select {
+      appearance: none;
+      border: 1px solid rgba(117, 209, 237, 0.34);
+      background: rgba(18, 48, 69, 0.82);
+      color: var(--text);
+      border-radius: 7px;
+      min-height: 28px;
+      padding: 0 8px;
+      font: 700 11px/1 ui-sans-serif, system-ui, sans-serif;
+      letter-spacing: 0;
+    }
+
+    button:hover,
+    select:hover {
+      border-color: rgba(114, 231, 255, 0.72);
+      background: rgba(27, 74, 102, 0.92);
+    }
+
+    button.active {
+      border-color: rgba(109, 255, 157, 0.78);
+      color: #dfffe9;
+    }
+
+    .slider {
+      grid-column: span 2;
+      min-width: 116px;
+      display: grid;
+      gap: 2px;
+    }
+
+    .slider label,
+    .toggle,
+    .speed {
+      color: var(--muted);
+      font: 700 9.5px/1.1 ui-sans-serif, system-ui, sans-serif;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .slider label {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: #58ddff;
+      min-height: 16px;
+    }
+
+    .toggle {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 28px;
+      padding: 0 4px;
+      white-space: nowrap;
+    }
+
+    .toggle input {
+      accent-color: #58ddff;
+    }
+
+    .speed {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .speed select {
+      min-height: 26px;
+      padding: 0 7px;
+      font-size: 10px;
+    }
+
+    .metrics {
+      justify-self: end;
+      width: min(320px, 100%);
+      padding: 8px;
+      position: relative;
+    }
+
+    .metrics > .panel-toggle {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      z-index: 2;
+    }
+
+    .metrics .minimizable-body {
+      padding-right: 28px;
+    }
+
+    .metric-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 5px;
+    }
+
+    .metric-title {
+      margin: 0;
+      color: #ffffff;
+      font: 800 12px/1.15 ui-sans-serif, system-ui, sans-serif;
+      letter-spacing: 0;
+    }
+
+    .badge {
+      border: 1px solid rgba(109, 255, 157, 0.42);
+      color: var(--green);
+      background: rgba(40, 128, 83, 0.18);
+      border-radius: 999px;
+      padding: 3px 6px;
+      font: 800 9px/1 ui-sans-serif, system-ui, sans-serif;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .badge.off {
+      border-color: rgba(255, 199, 95, 0.5);
+      color: #ffd483;
+      background: rgba(171, 107, 10, 0.22);
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 4px;
+    }
+
+    .metric {
+      min-width: 0;
+      border: 1px solid rgba(116, 192, 216, 0.16);
+      background: rgba(1, 9, 18, 0.34);
+      border-radius: 7px;
+      padding: 5px;
+    }
+
+    .metric span {
+      display: block;
+      color: #8fbaca;
+      font: 700 8.8px/1.05 ui-sans-serif, system-ui, sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      margin-bottom: 3px;
+    }
+
+    .metric strong {
+      display: block;
+      overflow-wrap: anywhere;
+      color: #f1fbff;
+      font: 750 10.5px/1.2 ui-sans-serif, system-ui, sans-serif;
+      letter-spacing: 0;
+    }
+
+    .token-kpi {
+      background: linear-gradient(135deg, rgba(35, 116, 146, 0.34), rgba(1, 9, 18, 0.48));
+      border-color: rgba(91, 224, 255, 0.30);
+    }
+
+    .token-kpi strong {
+      color: #eaffff;
+      font-size: 12.5px;
+    }
+
+    .token-kpi small {
+      display: block;
+      margin-top: 3px;
+      color: rgba(188, 229, 238, 0.66);
+      font: 700 9px/1.2 ui-sans-serif, system-ui, sans-serif;
+    }
+
+    .wide {
+      grid-column: span 2;
+    }
+
+    .legend {
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      pointer-events: auto;
+      padding: 6px 8px;
+      border: 1px solid rgba(143, 211, 232, 0.22);
+      background: rgba(3, 12, 22, 0.56);
+      border-radius: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px 10px;
+      max-width: min(560px, calc(100vw - 24px));
+      color: #b7dce7;
+      font: 700 9.5px/1.1 ui-sans-serif, system-ui, sans-serif;
+    }
+
+    .legend .minimizable-body {
+      display: contents;
+    }
+
+    .legend.is-minimized .minimizable-body {
+      display: none;
+    }
+
+    .key {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+
+    .swatch {
+      width: 12px;
+      height: 7px;
+      border-radius: 999px;
+      box-shadow: 0 0 12px currentColor;
+    }
+
+    .status {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      max-width: min(400px, calc(100vw - 24px));
+      pointer-events: auto;
+      border: 1px solid rgba(143, 211, 232, 0.22);
+      background: rgba(2, 11, 21, 0.62);
+      border-radius: 8px;
+      padding: 6px 8px;
+      color: #c8edf6;
+      font: 700 10px/1.25 ui-sans-serif, system-ui, sans-serif;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .colorbar {
+      position: absolute;
+      right: 18px;
+      top: 52%;
+      transform: translateY(-50%);
+      width: 10px;
+      height: 130px;
+      border: 1px solid rgba(222, 249, 255, 0.28);
+      border-radius: 999px;
+      background: linear-gradient(180deg, #e93463, #ffc857 35%, #37e39f 66%, #54dfff);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms ease;
+    }
+
+    .colorbar.show {
+      opacity: 0.9;
+    }
+
+    .colorbar::before,
+    .colorbar::after {
+      position: absolute;
+      right: 18px;
+      color: #bdebf3;
+      font: 800 10px/1 ui-sans-serif, system-ui, sans-serif;
+      white-space: nowrap;
+    }
+
+    .colorbar::before {
+      content: "112 dB";
+      top: -2px;
+    }
+
+    .colorbar::after {
+      content: "45 dB";
+      bottom: -2px;
+    }
+
+    @media (max-width: 980px) {
+      .topbar {
+        grid-template-columns: 1fr;
+      }
+
+      .metrics {
+        justify-self: start;
+      }
+
+      .controls {
+        align-items: flex-start;
+      }
+
+      .controls-body {
+        grid-template-columns: repeat(4, minmax(0, auto));
+      }
+
+      .slider {
+        grid-column: span 2;
+      }
+    }
+
+    @media (max-width: 780px) {
+      .legend {
+        right: 12px;
+        bottom: var(--status-clearance);
+        max-width: none;
+      }
+
+      .status {
+        left: 12px;
+        right: 12px;
+        max-width: none;
+      }
+
+      .metrics {
+        max-height: var(--metrics-max-height);
+        overflow-y: auto;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .topbar {
+        left: 8px;
+        right: 8px;
+        top: 8px;
+      }
+
+      .controls {
+        align-items: flex-start;
+      }
+
+      .controls-body {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .slider {
+        grid-column: span 3;
+      }
+
+      #canonicalBtn {
+        grid-column: span 2;
+      }
+
+      button,
+      select {
+        min-width: 0;
+        padding: 0 8px;
+      }
+
+      .metric-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .wide {
+        grid-column: span 2;
+      }
+
+      .legend,
+      .status {
+        left: 8px;
+        right: 8px;
+      }
+
+      .status {
+        bottom: 8px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <canvas id="scene" aria-label="3D acoustic ray propagation visualization"></canvas>
+    <div class="topbar">
+      <div id="controls" class="panel controls" aria-label="Ray view controls">
+        <button class="panel-toggle" type="button" data-minimize-target="controls" aria-label="Minimize controls" aria-expanded="true">−</button>
+        <div class="minimizable-body controls-body">
+          <button id="playBtn" type="button">Play</button>
+          <button id="resetBtn" type="button">Reset</button>
+          <button id="cameraBtn" type="button">Camera</button>
+          <button id="canonicalBtn" type="button">Reset to canonical</button>
+          <button id="arrivalsToggleBtn" class="active" type="button" data-minimize-target="arrivals" aria-pressed="true">Arrivals</button>
+          <button id="sectionToggleBtn" class="active" type="button" data-minimize-target="section" aria-pressed="true">Section</button>
+          <div class="slider">
+            <label for="elevSlider">Elevation beams <output id="elevOut">41</output></label>
+            <input id="elevSlider" type="range" min="11" max="81" step="2" value="41" list="elevTicks">
+            <datalist id="elevTicks">
+              <option value="41" label="canonical"></option>
+            </datalist>
+          </div>
+          <div class="slider">
+            <label for="azSlider">Azimuth beams <output id="azOut">31</output></label>
+            <input id="azSlider" type="range" min="9" max="61" step="2" value="31" list="azTicks">
+            <datalist id="azTicks">
+              <option value="31" label="canonical"></option>
+            </datalist>
+          </div>
+          <div class="slider">
+            <label for="timeSlider">Playback time <output id="timeOut">0.0 s</output></label>
+            <input id="timeSlider" type="range" min="0" max="60" step="0.1" value="0">
+          </div>
+          <div class="slider">
+            <label for="opacitySlider">Volume opacity <output id="opacityOut">46%</output></label>
+            <input id="opacitySlider" type="range" min="0" max="100" step="1" value="46">
+          </div>
+          <label class="toggle" for="tlToggle">
+            <input id="tlToggle" type="checkbox">
+            TL colour
+          </label>
+          <label class="speed" for="speedSelect">Speed
+            <select id="speedSelect">
+              <option value="0.5">0.5x</option>
+              <option value="1" selected>1x</option>
+              <option value="2">2x</option>
+              <option value="4">4x</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <aside id="metrics" class="panel metrics" aria-live="polite">
+        <button class="panel-toggle" type="button" data-minimize-target="metrics" aria-label="Minimize metrics" aria-expanded="true">−</button>
+        <div id="metricsBody" class="minimizable-body"></div>
+      </aside>
+    </div>
+    <div id="legend" class="legend" aria-label="Legend">
+      <button class="panel-toggle" type="button" data-minimize-target="legend" aria-label="Minimize legend" aria-expanded="true">−</button>
+      <div class="minimizable-body">
+        <span class="key"><i class="swatch" style="color:#46ddff;background:#46ddff"></i>Insonified volume</span>
+        <span class="key"><i class="swatch" style="color:#06101d;background:#06101d"></i>Shadow empty/dark</span>
+        <span class="key"><i class="swatch" style="color:#b5aa69;background:#b5aa69"></i>Seabed / seamounts</span>
+        <span class="key"><i class="swatch" style="color:#ffcf83;background:#ffcf83"></i>Launch-angle rays</span>
+        <span class="key"><i class="swatch" style="color:#fff6db;background:#fff6db"></i>Source S</span>
+        <span class="key"><i class="swatch" style="color:#52e4ff;background:#52e4ff"></i>Receiver R</span>
+      </div>
+    </div>
+    <div id="statusPanel" class="status">
+      <button class="panel-toggle" type="button" data-minimize-target="status" aria-label="Minimize status" aria-expanded="true">−</button>
+      <span id="status" class="minimizable-body">Preparing canonical ray trace...</span>
+    </div>
+    <div id="colorbar" class="colorbar" aria-hidden="true"></div>
+  </div>
+
+  <script>
+    "use strict";
+
+    const DOMAIN = {
+      xMin: 0,
+      xMax: 50000,
+      yMin: 0,
+      yMax: 24000,
+      zMin: 0,
+      zMax: 3000
+    };
+
+    const SOURCE = { x: 0, y: 12000, z: 50 };
+    const RECEIVER = { x: 40000, y: 9000, z: 1000 };
+
+    const CANONICAL = {
+      elevBeams: 41,
+      azBeams: 31,
+      elevMinDeg: -20,
+      elevMaxDeg: 20,
+      azMinDeg: -15,
+      azMaxDeg: 15,
+      gridNX: 101,
+      gridNY: 49,
+      gridNZ: 31,
+      ds: 120,
+      maxSteps: 760,
+      seabedLossDb: 3.0,
+      shadowCutoffDb: 112,
+      eigenToleranceM: 250,
+      voxelReachRadiusM: 650
+    };
+
+    const GRID = {
+      nx: CANONICAL.gridNX,
+      ny: CANONICAL.gridNY,
+      nz: CANONICAL.gridNZ,
+      dx: (DOMAIN.xMax - DOMAIN.xMin) / (CANONICAL.gridNX - 1),
+      dy: (DOMAIN.yMax - DOMAIN.yMin) / (CANONICAL.gridNY - 1),
+      dz: (DOMAIN.zMax - DOMAIN.zMin) / (CANONICAL.gridNZ - 1)
+    };
+
+    const INF_TL = 999;
+    const RAY_ALPHA = 0.52;
+    const VERTICAL_EXAGGERATION = 3.9;
+    const SEABED_BASE_DEPTH = 2500;
+    const SEAMOUNT_MAX_RISE = 1900;
+    const SESSION_TOKENS_TOTAL = 28672400;
+    const SESSION_TOKEN_COST_USD = 120.39;
+    const SESSION_TOKEN_SOURCE = "local Codex logs, workspace rollouts";
+
+    const canvas = document.getElementById("scene");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const playBtn = document.getElementById("playBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const cameraBtn = document.getElementById("cameraBtn");
+    const canonicalBtn = document.getElementById("canonicalBtn");
+    const elevSlider = document.getElementById("elevSlider");
+    const azSlider = document.getElementById("azSlider");
+    const timeSlider = document.getElementById("timeSlider");
+    const opacitySlider = document.getElementById("opacitySlider");
+    const tlToggle = document.getElementById("tlToggle");
+    const speedSelect = document.getElementById("speedSelect");
+    const elevOut = document.getElementById("elevOut");
+    const azOut = document.getElementById("azOut");
+    const timeOut = document.getElementById("timeOut");
+    const opacityOut = document.getElementById("opacityOut");
+    const metricsEl = document.getElementById("metrics");
+    const metricsBodyEl = document.getElementById("metricsBody");
+    const statusEl = document.getElementById("status");
+    const colorbarEl = document.getElementById("colorbar");
+    const arrivalsToggleBtn = document.getElementById("arrivalsToggleBtn");
+    const sectionToggleBtn = document.getElementById("sectionToggleBtn");
+
+    const CAMERA_HOME = {
+      yaw: -0.73,
+      pitch: 1.08,
+      zoom: 0.91
+    };
+
+    const CAMERA_FRAME = {
+      centerX: 0.50,
+      centerY: 0.50
+    };
+
+    const ORTHOGRAPHIC_PROJECTION_SCALE = 1;
+
+    const camera = {
+      yaw: CAMERA_HOME.yaw,
+      pitch: CAMERA_HOME.pitch,
+      zoom: CAMERA_HOME.zoom,
+      scale: 15,
+      cx: 0,
+      cy: 0
+    };
+
+    const sceneLabelRects = [];
+    const sceneLabelBlockRects = [];
+
+    const state = {
+      rays: [],
+      field: null,
+      volumePoints: [],
+      seabedMesh: [],
+      crossSection: [],
+      metrics: null,
+      convergence: null,
+      currentTime: 0,
+      maxTime: 60,
+      playing: false,
+      showArrivals: true,
+      showCrossSection: true,
+      lastFrameMs: performance.now(),
+      fps: 0,
+      frameCount: 0,
+      fpsWindowStart: performance.now(),
+      tracing: false,
+      retraceTimer: 0,
+      pointer: null
+    };
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function smoothstep(edge0, edge1, value) {
+      const t = clamp((value - edge0) / (edge1 - edge0), 0, 1);
+      return t * t * (3 - 2 * t);
+    }
+
+    function lerp(a, b, t) {
+      return a + (b - a) * t;
+    }
+
+    function degToRad(deg) {
+      return deg * Math.PI / 180;
+    }
+
+    function length3(v) {
+      return Math.hypot(v.x, v.y, v.z);
+    }
+
+    function normalize3(v) {
+      const len = length3(v) || 1;
+      return { x: v.x / len, y: v.y / len, z: v.z / len };
+    }
+
+    function dot3(a, b) {
+      return a.x * b.x + a.y * b.y + a.z * b.z;
+    }
+
+    function cross3(a, b) {
+      return {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x
+      };
+    }
+
+    function reflect3(v, n) {
+      const d = dot3(v, n);
+      return normalize3({
+        x: v.x - 2 * d * n.x,
+        y: v.y - 2 * d * n.y,
+        z: v.z - 2 * d * n.z
+      });
+    }
+
+    function soundSpeed(z) {
+      if (z <= 200) return 1520 - 0.10 * z;
+      return 1500 + 0.018 * (z - 200);
+    }
+
+    function soundGradient(z) {
+      return z <= 200 ? -0.10 : 0.018;
+    }
+
+    function bathymetry(x, y) {
+      const xKm = x / 1000;
+      const yKm = y / 1000;
+      const q1 = ((xKm - 18) / 2.5) ** 2 + ((yKm - 12) / 3.0) ** 2;
+      const q2 = ((xKm - 34) / 2.0) ** 2 + ((yKm - 9) / 2.5) ** 2;
+      return 2500 - 1500 * Math.exp(-q1) - 1900 * Math.exp(-q2);
+    }
+
+    function bathymetryGradient(x, y) {
+      const xKm = x / 1000;
+      const yKm = y / 1000;
+      const terms = [
+        { amp: 1500, cx: 18, cy: 12, sx: 2.5, sy: 3.0 },
+        { amp: 1900, cx: 34, cy: 9, sx: 2.0, sy: 2.5 }
+      ];
+      let dx = 0;
+      let dy = 0;
+      for (const term of terms) {
+        const q = ((xKm - term.cx) / term.sx) ** 2 + ((yKm - term.cy) / term.sy) ** 2;
+        const e = Math.exp(-q);
+        dx += term.amp * e * 2 * (xKm - term.cx) / (term.sx * term.sx) / 1000;
+        dy += term.amp * e * 2 * (yKm - term.cy) / (term.sy * term.sy) / 1000;
+      }
+      return { dx, dy };
+    }
+
+    function seabedNormal(x, y) {
+      const g = bathymetryGradient(x, y);
+      return normalize3({ x: -g.dx, y: -g.dy, z: 1 });
+    }
+
+    function tlFromPath(pathLength, boundaryLossDb) {
+      return 20 * Math.log10(Math.max(1, pathLength)) + boundaryLossDb;
+    }
+
+    function gridIndex(ix, iy, iz) {
+      return ix + GRID.nx * (iy + GRID.ny * iz);
+    }
+
+    function gridPosition(ix, iy, iz) {
+      return {
+        x: DOMAIN.xMin + ix * GRID.dx,
+        y: DOMAIN.yMin + iy * GRID.dy,
+        z: DOMAIN.zMin + iz * GRID.dz
+      };
+    }
+
+    function makeDirectionFromFrame(elevRad, azRad, forward) {
+      const f = normalize3(forward);
+      let side = cross3({ x: 0, y: 0, z: 1 }, f);
+      if (length3(side) < 0.0001) side = { x: 0, y: 1, z: 0 };
+      side = normalize3(side);
+      const down = normalize3(cross3(f, side));
+      const ce = Math.cos(elevRad);
+      const se = Math.sin(elevRad);
+      const ca = Math.cos(azRad);
+      const sa = Math.sin(azRad);
+      return normalize3({
+        x: f.x * ce * ca + side.x * ce * sa + down.x * se,
+        y: f.y * ce * ca + side.y * ce * sa + down.y * se,
+        z: f.z * ce * ca + side.z * ce * sa + down.z * se
+      });
+    }
+
+    function segmentClosest(a, b, p) {
+      const ab = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
+      const ap = { x: p.x - a.x, y: p.y - a.y, z: p.z - a.z };
+      const len2 = dot3(ab, ab) || 1;
+      const u = clamp(dot3(ap, ab) / len2, 0, 1);
+      const q = {
+        x: a.x + ab.x * u,
+        y: a.y + ab.y * u,
+        z: a.z + ab.z * u
+      };
+      return {
+        u,
+        point: q,
+        dist: Math.hypot(q.x - p.x, q.y - p.y, q.z - p.z)
+      };
+    }
+
+    function traceRay(origin, direction, options) {
+      const ds = options.ds || CANONICAL.ds;
+      const maxSteps = options.maxSteps || CANONICAL.maxSteps;
+      const store = options.store !== false;
+      const points = store ? [] : null;
+      let pos = { x: origin.x, y: origin.y, z: origin.z };
+      let dir = normalize3(direction);
+      let pathLength = 0;
+      let travelTime = 0;
+      let bedBounces = 0;
+      let surfaceBounces = 0;
+      let boundaryLossDb = 0;
+      const initialSnell = Math.hypot(dir.x, dir.y) / soundSpeed(pos.z);
+      let maxSnellDrift = 0;
+
+      if (store) {
+        points.push({
+          x: pos.x,
+          y: pos.y,
+          z: pos.z,
+          t: travelTime,
+          s: pathLength,
+          tl: 0
+        });
+      }
+
+      let previous = { x: pos.x, y: pos.y, z: pos.z };
+      for (let step = 0; step < maxSteps; step += 1) {
+        previous = { x: pos.x, y: pos.y, z: pos.z };
+        const c = soundSpeed(pos.z);
+        const gradLnCz = soundGradient(pos.z) / c;
+        const dotGrad = dir.z * gradLnCz;
+        dir = normalize3({
+          x: dir.x + (dir.x * dotGrad) * ds,
+          y: dir.y + (dir.y * dotGrad) * ds,
+          z: dir.z + (-gradLnCz + dir.z * dotGrad) * ds
+        });
+
+        const midZ = clamp(pos.z + dir.z * ds * 0.5, 0, DOMAIN.zMax);
+        pos = {
+          x: pos.x + dir.x * ds,
+          y: pos.y + dir.y * ds,
+          z: pos.z + dir.z * ds
+        };
+        pathLength += ds;
+        travelTime += ds / soundSpeed(midZ);
+
+        if (pos.z < 0) {
+          pos.z = -pos.z;
+          dir.z = Math.abs(dir.z);
+          surfaceBounces += 1;
+        }
+
+        const inHorizontalBounds = pos.x >= DOMAIN.xMin - 500 &&
+          pos.x <= DOMAIN.xMax + 500 &&
+          pos.y >= DOMAIN.yMin - 500 &&
+          pos.y <= DOMAIN.yMax + 500;
+
+        if (inHorizontalBounds) {
+          const bed = bathymetry(pos.x, pos.y);
+          if (pos.z > bed) {
+            const normal = seabedNormal(pos.x, pos.y);
+            dir = reflect3(dir, normal);
+            pos.z = Math.max(2, bed - 8);
+            bedBounces += 1;
+            boundaryLossDb += CANONICAL.seabedLossDb;
+          }
+        }
+
+        const snell = Math.hypot(dir.x, dir.y) / soundSpeed(clamp(pos.z, 0, DOMAIN.zMax));
+        maxSnellDrift = Math.max(maxSnellDrift, Math.abs(snell - initialSnell));
+
+        if (store) {
+          points.push({
+            x: pos.x,
+            y: pos.y,
+            z: pos.z,
+            t: travelTime,
+            s: pathLength,
+            tl: tlFromPath(pathLength, boundaryLossDb)
+          });
+        }
+
+        if (pos.x < DOMAIN.xMin - 1000 || pos.x > DOMAIN.xMax + 1000 ||
+            pos.y < DOMAIN.yMin - 1500 || pos.y > DOMAIN.yMax + 1500 ||
+            pos.z > DOMAIN.zMax + 600) {
+          break;
+        }
+
+        if (Math.hypot(pos.x - previous.x, pos.y - previous.y, pos.z - previous.z) < 0.01) {
+          break;
+        }
+      }
+
+      return {
+        points,
+        end: pos,
+        travelTime,
+        pathLength,
+        bedBounces,
+        surfaceBounces,
+        boundaryLossDb,
+        maxSnellDrift
+      };
+    }
+
+    function depositSample(field, p, tl) {
+      if (!field) return;
+      if (p.x < DOMAIN.xMin || p.x > DOMAIN.xMax ||
+          p.y < DOMAIN.yMin || p.y > DOMAIN.yMax ||
+          p.z < DOMAIN.zMin || p.z > DOMAIN.zMax) {
+        return;
+      }
+      const ix = Math.round((p.x - DOMAIN.xMin) / GRID.dx);
+      const iy = Math.round((p.y - DOMAIN.yMin) / GRID.dy);
+      const iz = Math.round((p.z - DOMAIN.zMin) / GRID.dz);
+      const rx = Math.ceil(CANONICAL.voxelReachRadiusM / GRID.dx);
+      const ry = Math.ceil(CANONICAL.voxelReachRadiusM / GRID.dy);
+      const rz = Math.ceil(CANONICAL.voxelReachRadiusM / GRID.dz);
+      const x0 = clamp(ix - rx, 0, GRID.nx - 1);
+      const x1 = clamp(ix + rx, 0, GRID.nx - 1);
+      const y0 = clamp(iy - ry, 0, GRID.ny - 1);
+      const y1 = clamp(iy + ry, 0, GRID.ny - 1);
+      const z0 = clamp(iz - rz, 0, GRID.nz - 1);
+      const z1 = clamp(iz + rz, 0, GRID.nz - 1);
+      const r2 = CANONICAL.voxelReachRadiusM * CANONICAL.voxelReachRadiusM;
+
+      for (let kz = z0; kz <= z1; kz += 1) {
+        const gz = DOMAIN.zMin + kz * GRID.dz;
+        const dz = gz - p.z;
+        for (let jy = y0; jy <= y1; jy += 1) {
+          const gy = DOMAIN.yMin + jy * GRID.dy;
+          const dy = gy - p.y;
+          for (let ix2 = x0; ix2 <= x1; ix2 += 1) {
+            const gx = DOMAIN.xMin + ix2 * GRID.dx;
+            const dx = gx - p.x;
+            const d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 <= r2) {
+              const penalty = 20 * Math.log10(1 + Math.sqrt(d2) / CANONICAL.voxelReachRadiusM);
+              const idx = gridIndex(ix2, jy, kz);
+              const candidate = tl + penalty;
+              if (candidate < field[idx]) field[idx] = candidate;
+            }
+          }
+        }
+      }
+    }
+
+    function updateReceiverNearest(ray, target, nearest, eigenrays, tolerance) {
+      const points = ray.points;
+      let best = null;
+      for (let i = 1; i < points.length; i += 1) {
+        const a = points[i - 1];
+        const b = points[i];
+        const close = segmentClosest(a, b, target);
+        const t = lerp(a.t, b.t, close.u);
+        const tl = lerp(a.tl, b.tl, close.u);
+        if (!best || close.dist < best.dist) {
+          best = {
+            dist: close.dist,
+            time: t,
+            tl,
+            point: close.point
+          };
+        }
+      }
+      if (best && best.dist < nearest.dist) {
+        nearest.dist = best.dist;
+        nearest.time = best.time;
+        nearest.tl = best.tl;
+        nearest.rayId = ray.id;
+      }
+      if (best && best.dist <= tolerance) {
+        ray.eigen = true;
+        eigenrays.push({
+          rayId: ray.id,
+          elevDeg: ray.elevDeg,
+          azDeg: ray.azDeg,
+          time: best.time,
+          tl: best.tl,
+          missM: best.dist
+        });
+      }
+    }
+
+    function outOfPlaneDeflection(points, origin, initialDir) {
+      const hLen = Math.hypot(initialDir.x, initialDir.y) || 1;
+      const nx = -initialDir.y / hLen;
+      const ny = initialDir.x / hLen;
+      let max = 0;
+      for (const p of points) {
+        const d = Math.abs((p.x - origin.x) * nx + (p.y - origin.y) * ny);
+        if (d > max) max = d;
+      }
+      return max;
+    }
+
+    function traceFan(elevBeams, azBeams, options = {}) {
+      const started = performance.now();
+      const origin = options.origin || SOURCE;
+      const target = options.target || RECEIVER;
+      const forward = options.forward || { x: 1, y: 0, z: 0 };
+      const store = options.store !== false;
+      const makeField = options.makeField !== false;
+      const ds = options.ds || CANONICAL.ds;
+      const maxSteps = options.maxSteps || CANONICAL.maxSteps;
+      const depositStride = options.depositStride || 1;
+      const rays = [];
+      const field = makeField ? new Float32Array(GRID.nx * GRID.ny * GRID.nz) : null;
+      if (field) field.fill(INF_TL);
+      const eigenrays = [];
+      const nearest = { dist: Infinity, time: 0, tl: INF_TL, rayId: -1 };
+      let rayId = 0;
+      let maxTime = 0;
+      let maxOutOfPlaneM = 0;
+      let maxSnellDrift = 0;
+
+      for (let ie = 0; ie < elevBeams; ie += 1) {
+        const et = elevBeams === 1 ? 0.5 : ie / (elevBeams - 1);
+        const elevDeg = lerp(CANONICAL.elevMinDeg, CANONICAL.elevMaxDeg, et);
+        for (let ia = 0; ia < azBeams; ia += 1) {
+          const at = azBeams === 1 ? 0.5 : ia / (azBeams - 1);
+          const azDeg = lerp(CANONICAL.azMinDeg, CANONICAL.azMaxDeg, at);
+          const dir = makeDirectionFromFrame(degToRad(elevDeg), degToRad(azDeg), forward);
+          const traced = traceRay(origin, dir, { ds, maxSteps, store: true });
+          const ray = {
+            id: rayId,
+            elevDeg,
+            azDeg,
+            color: rayColor(elevDeg, azDeg),
+            initialDir: dir,
+            points: traced.points,
+            bedBounces: traced.bedBounces,
+            surfaceBounces: traced.surfaceBounces,
+            maxSnellDrift: traced.maxSnellDrift,
+            eigen: false
+          };
+
+          if (field) {
+            for (let i = 0; i < ray.points.length; i += depositStride) {
+              const p = ray.points[i];
+              depositSample(field, p, p.tl);
+            }
+          }
+
+          updateReceiverNearest(ray, target, nearest, eigenrays, CANONICAL.eigenToleranceM);
+          maxTime = Math.max(maxTime, traced.travelTime);
+          maxOutOfPlaneM = Math.max(maxOutOfPlaneM, outOfPlaneDeflection(ray.points, origin, dir));
+          maxSnellDrift = Math.max(maxSnellDrift, traced.maxSnellDrift);
+          if (store) rays.push(ray);
+          rayId += 1;
+        }
+      }
+
+      const coverage = computeCoverage(field);
+      const elapsedMs = performance.now() - started;
+      eigenrays.sort((a, b) => a.time - b.time || a.tl - b.tl);
+      const limitedEigenrays = eigenrays.slice(0, 18);
+
+      return {
+        rays,
+        field,
+        maxTime,
+        nearest,
+        eigenrays: limitedEigenrays,
+        rawEigenrayCount: eigenrays.length,
+        coverage,
+        maxOutOfPlaneM,
+        maxSnellDrift,
+        elapsedMs,
+        rayCount: elevBeams * azBeams,
+        elevBeams,
+        azBeams
+      };
+    }
+
+    function computeCoverage(field) {
+      if (!field) {
+        return { reached: 0, shadow: 0, reachedFraction: 0, shadowFraction: 1 };
+      }
+      let reached = 0;
+      for (let i = 0; i < field.length; i += 1) {
+        if (field[i] <= CANONICAL.shadowCutoffDb) reached += 1;
+      }
+      const total = field.length;
+      return {
+        reached,
+        shadow: total - reached,
+        reachedFraction: reached / total,
+        shadowFraction: 1 - reached / total
+      };
+    }
+
+    function rayColor(elevDeg, azDeg) {
+      const hue = lerp(195, 18, (elevDeg - CANONICAL.elevMinDeg) /
+        (CANONICAL.elevMaxDeg - CANONICAL.elevMinDeg));
+      const light = 58 + 8 * Math.sin((azDeg + 15) / 30 * Math.PI);
+      return `hsl(${hue.toFixed(1)} 94% ${light.toFixed(1)}%)`;
+    }
+
+    function tlColor(tl, alpha) {
+      const t = clamp((tl - 45) / (CANONICAL.shadowCutoffDb - 45), 0, 1);
+      const hue = lerp(188, 344, t);
+      const sat = lerp(94, 88, t);
+      const light = lerp(62, 58, t);
+      return `hsla(${hue.toFixed(1)} ${sat.toFixed(1)}% ${light.toFixed(1)}% ${alpha})`;
+    }
+
+    function buildVolumePoints(field) {
+      const points = [];
+      if (!field) return points;
+      for (let iz = 0; iz < GRID.nz; iz += 2) {
+        for (let iy = 0; iy < GRID.ny; iy += 3) {
+          for (let ix = 0; ix < GRID.nx; ix += 3) {
+            const idx = gridIndex(ix, iy, iz);
+            const tl = field[idx];
+            if (tl <= CANONICAL.shadowCutoffDb) {
+              const p = gridPosition(ix, iy, iz);
+              const bed = bathymetry(p.x, p.y);
+              if (p.z <= bed) points.push({ x: p.x, y: p.y, z: p.z, tl });
+            }
+          }
+        }
+      }
+      return points;
+    }
+
+    function buildSeabedMesh() {
+      const cells = [];
+      const nx = 76;
+      const ny = 44;
+      for (let ix = 0; ix < nx - 1; ix += 1) {
+        for (let iy = 0; iy < ny - 1; iy += 1) {
+          const x0 = lerp(DOMAIN.xMin, DOMAIN.xMax, ix / (nx - 1));
+          const x1 = lerp(DOMAIN.xMin, DOMAIN.xMax, (ix + 1) / (nx - 1));
+          const y0 = lerp(DOMAIN.yMin, DOMAIN.yMax, iy / (ny - 1));
+          const y1 = lerp(DOMAIN.yMin, DOMAIN.yMax, (iy + 1) / (ny - 1));
+          const p00 = { x: x0, y: y0, z: bathymetry(x0, y0) };
+          const p10 = { x: x1, y: y0, z: bathymetry(x1, y0) };
+          const p11 = { x: x1, y: y1, z: bathymetry(x1, y1) };
+          const p01 = { x: x0, y: y1, z: bathymetry(x0, y1) };
+          const cx = (x0 + x1) * 0.5;
+          const cy = (y0 + y1) * 0.5;
+          const n = seabedNormal(cx, cy);
+          const g = bathymetryGradient(cx, cy);
+          const slope = clamp(Math.hypot(g.dx, g.dy) * 1.4, 0, 1);
+          const cz = bathymetry(cx, cy);
+          const relief = clamp((SEABED_BASE_DEPTH - cz) / SEAMOUNT_MAX_RISE, 0, 1);
+          const summit = smoothstep(0.56, 0.82, relief);
+          const light = normalize3({ x: -0.55, y: -0.42, z: 0.72 });
+          const directional = clamp(0.5 + 0.5 * dot3(n, light), 0, 1);
+          const shade = clamp(0.30 + 0.36 * directional + 0.12 * relief + 0.07 * slope + 0.16 * summit, 0, 1);
+          cells.push({ points: [p00, p10, p11, p01], shade, relief, slope, summit, cx, cy, cz });
+        }
+      }
+      return cells;
+    }
+
+    function buildCrossSection() {
+      const y = 12000;
+      const samples = [];
+      for (let ix = 0; ix <= 220; ix += 1) {
+        const x = lerp(DOMAIN.xMin, DOMAIN.xMax, ix / 220);
+        samples.push({ x, z: bathymetry(x, y) });
+      }
+      return samples;
+    }
+
+    function computeTlAtPoint(field, point) {
+      if (!field) return INF_TL;
+      const ix = clamp(Math.round((point.x - DOMAIN.xMin) / GRID.dx), 0, GRID.nx - 1);
+      const iy = clamp(Math.round((point.y - DOMAIN.yMin) / GRID.dy), 0, GRID.ny - 1);
+      const iz = clamp(Math.round((point.z - DOMAIN.zMin) / GRID.dz), 0, GRID.nz - 1);
+      return field[gridIndex(ix, iy, iz)];
+    }
+
+    function makeMetrics(trace) {
+      const tlAtR = computeTlAtPoint(trace.field, RECEIVER);
+      const reached = trace.nearest.dist <= CANONICAL.eigenToleranceM || tlAtR <= CANONICAL.shadowCutoffDb;
+      const tlR = reached ? Math.min(trace.nearest.tl, tlAtR) :
+        Math.min(INF_TL, CANONICAL.shadowCutoffDb + Math.max(0, trace.nearest.dist - CANONICAL.eigenToleranceM) / 120);
+      return {
+        canonical: isCanonicalControls(),
+        reached,
+        nearestMissM: trace.nearest.dist,
+        tlRDb: tlR,
+        tlAtGridRDb: tlAtR,
+        coverageFraction: trace.coverage.reachedFraction,
+        shadowFraction: trace.coverage.shadowFraction,
+        maxOutOfPlaneM: trace.maxOutOfPlaneM,
+        maxSnellDrift: trace.maxSnellDrift,
+        rayCount: trace.rayCount,
+        elevBeams: trace.elevBeams,
+        azBeams: trace.azBeams,
+        eigenrayCount: trace.rawEigenrayCount,
+        eigenrays: trace.eigenrays,
+        traceMs: trace.elapsedMs,
+        reciprocityErrorDb: null,
+        reciprocalTlDb: null,
+        convergenceCoverageDeltaPct: null,
+        convergenceTlDeltaDb: null,
+        fileSizeKb: estimateFileSizeKb()
+      };
+    }
+
+    function estimateFileSizeKb() {
+      const htmlText = document.documentElement.outerHTML || "";
+      return htmlText.length / 1024;
+    }
+
+    function isCanonicalControls() {
+      return Number(elevSlider.value) === CANONICAL.elevBeams &&
+        Number(azSlider.value) === CANONICAL.azBeams;
+    }
+
+    function formatDb(value) {
+      if (!Number.isFinite(value) || value >= 998) return ">112";
+      return value.toFixed(1);
+    }
+
+    function formatMeters(value) {
+      if (!Number.isFinite(value)) return "n/a";
+      if (value >= 1000) return `${(value / 1000).toFixed(2)} km`;
+      return `${value.toFixed(0)} m`;
+    }
+
+    function formatPct(value) {
+      if (!Number.isFinite(value)) return "n/a";
+      return `${(100 * value).toFixed(1)}%`;
+    }
+
+    function formatCompactTokens(value) {
+      if (!Number.isFinite(value)) return "n/a";
+      if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+      if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
+      return String(Math.round(value));
+    }
+
+    function updateMetricsPanel() {
+      const m = state.metrics;
+      if (!m) {
+        metricsBodyEl.innerHTML = `
+          <div class="metric-head">
+            <h2 class="metric-title">Ray metrics</h2>
+            <span class="badge">Tracing</span>
+          </div>
+          <div class="metric-grid">
+            <div class="metric wide"><span>Status</span><strong>Computing canonical fan and TL grid...</strong></div>
+          </div>`;
+        return;
+      }
+      const canonicalClass = m.canonical ? "" : " off";
+      const canonicalText = m.canonical ? "canonical" : "off-canonical";
+      const eigenSummary = m.eigenrays.length
+        ? m.eigenrays.slice(0, 4).map(e => `${e.time.toFixed(2)}s/${formatDb(e.tl)}dB`).join(", ")
+        : "none within 250 m";
+      const reciprocity = m.reciprocityErrorDb === null ? "running" :
+        `${m.reciprocityErrorDb.toFixed(2)} dB`;
+      const convergence = m.convergenceCoverageDeltaPct === null ? "running" :
+        `${m.convergenceCoverageDeltaPct >= 0 ? "+" : ""}${m.convergenceCoverageDeltaPct.toFixed(2)} pct, ${m.convergenceTlDeltaDb >= 0 ? "+" : ""}${m.convergenceTlDeltaDb.toFixed(2)} dB`;
+      const tokenKpi = `${formatCompactTokens(SESSION_TOKENS_TOTAL)} tok · $${SESSION_TOKEN_COST_USD.toFixed(2)}`;
+
+      metricsBodyEl.innerHTML = `
+        <div class="metric-head">
+          <h2 class="metric-title">Ray metrics</h2>
+          <span class="badge${canonicalClass}">${canonicalText}</span>
+        </div>
+        <div class="metric-grid">
+          <div class="metric"><span>Reachability</span><strong>${m.reached ? "R reached" : "R shadowed"} / miss ${formatMeters(m.nearestMissM)}</strong></div>
+          <div class="metric"><span>TL(R)</span><strong>${formatDb(m.tlRDb)} dB</strong></div>
+          <div class="metric"><span>Coverage</span><strong>${formatPct(m.coverageFraction)} insonified</strong></div>
+          <div class="metric"><span>Shadow</span><strong>${formatPct(m.shadowFraction)} shadow</strong></div>
+          <div class="metric"><span>3D fidelity</span><strong>${formatMeters(m.maxOutOfPlaneM)} out-of-plane</strong></div>
+          <div class="metric"><span>Snell drift</span><strong>${m.maxSnellDrift.toExponential(2)}</strong></div>
+          <div class="metric"><span>Performance</span><strong>${state.fps.toFixed(0)} FPS / ${m.fileSizeKb.toFixed(0)} KB</strong></div>
+          <div class="metric"><span>Ray count</span><strong>${m.elevBeams} x ${m.azBeams} = ${m.rayCount}</strong></div>
+          <div class="metric wide"><span>Eigenrays</span><strong>${m.eigenrayCount} found: ${eigenSummary}</strong></div>
+          <div class="metric wide"><span>Reciprocity error</span><strong>${reciprocity}</strong></div>
+          <div class="metric wide"><span>2x convergence</span><strong>${convergence}</strong></div>
+          <div id="tokenKpi" class="metric wide token-kpi"><span>Token snapshot</span><strong>${tokenKpi}</strong><small>${SESSION_TOKEN_SOURCE}</small></div>
+        </div>`;
+    }
+
+    function postMetrics() {
+      if (!state.metrics || !state.field) return;
+      const payload = {
+        type: "ray_metrics",
+        canonical: state.metrics.canonical,
+        reached: state.metrics.reached,
+        nearestRayMissM: state.metrics.nearestMissM,
+        tlRDb: state.metrics.tlRDb,
+        coverageFraction: state.metrics.coverageFraction,
+        shadowFraction: state.metrics.shadowFraction,
+        maxOutOfPlaneDeflectionM: state.metrics.maxOutOfPlaneM,
+        maxSnellInvariantDrift: state.metrics.maxSnellDrift,
+        fps: state.fps,
+        fileSizeKb: state.metrics.fileSizeKb,
+        rayCount: state.metrics.rayCount,
+        elevBeams: state.metrics.elevBeams,
+        azBeams: state.metrics.azBeams,
+        eigenrayCount: state.metrics.eigenrayCount,
+        eigenrays: state.metrics.eigenrays,
+        reciprocityErrorDb: state.metrics.reciprocityErrorDb,
+        convergenceCoverageDeltaPct: state.metrics.convergenceCoverageDeltaPct,
+        convergenceTlDeltaDb: state.metrics.convergenceTlDeltaDb,
+        sessionTokenKpi: {
+          totalTokens: SESSION_TOKENS_TOTAL,
+          estimatedCostUsd: SESSION_TOKEN_COST_USD,
+          display: `${formatCompactTokens(SESSION_TOKENS_TOTAL)} tok · $${SESSION_TOKEN_COST_USD.toFixed(2)}`,
+          source: SESSION_TOKEN_SOURCE
+        },
+        grid: {
+          nx: GRID.nx,
+          ny: GRID.ny,
+          nz: GRID.nz,
+          xMinM: DOMAIN.xMin,
+          xMaxM: DOMAIN.xMax,
+          yMinM: DOMAIN.yMin,
+          yMaxM: DOMAIN.yMax,
+          zMinM: DOMAIN.zMin,
+          zMaxM: DOMAIN.zMax,
+          order: "row-major-x-fastest"
+        },
+        tlFieldDb: state.field,
+        tlGridDb: state.field
+      };
+      window.parent.postMessage(payload, "*");
+    }
+
+    function resetCamera() {
+      camera.yaw = CAMERA_HOME.yaw;
+      camera.pitch = CAMERA_HOME.pitch;
+      camera.zoom = CAMERA_HOME.zoom;
+    }
+
+    function resizeCanvas() {
+      const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      const w = Math.floor(window.innerWidth * dpr);
+      const h = Math.floor(window.innerHeight * dpr);
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+        canvas.style.width = `${window.innerWidth}px`;
+        canvas.style.height = `${window.innerHeight}px`;
+      }
+      camera.scale = Math.min(w / 66, h / 34) * camera.zoom;
+      const bounds = sceneBoundsInCameraSpace();
+      camera.cx = w * CAMERA_FRAME.centerX - ((bounds.minX + bounds.maxX) / 2) * camera.scale;
+      camera.cy = h * CAMERA_FRAME.centerY + ((bounds.minY + bounds.maxY) / 2) * camera.scale;
+    }
+
+    function sceneBoundsInCameraSpace() {
+      const corners = [
+        { x: DOMAIN.xMin, y: DOMAIN.yMin, z: DOMAIN.zMin },
+        { x: DOMAIN.xMax, y: DOMAIN.yMin, z: DOMAIN.zMin },
+        { x: DOMAIN.xMax, y: DOMAIN.yMax, z: DOMAIN.zMin },
+        { x: DOMAIN.xMin, y: DOMAIN.yMax, z: DOMAIN.zMin },
+        { x: DOMAIN.xMin, y: DOMAIN.yMin, z: DOMAIN.zMax },
+        { x: DOMAIN.xMax, y: DOMAIN.yMin, z: DOMAIN.zMax },
+        { x: DOMAIN.xMax, y: DOMAIN.yMax, z: DOMAIN.zMax },
+        { x: DOMAIN.xMin, y: DOMAIN.yMax, z: DOMAIN.zMax }
+      ];
+      return corners.reduce((bounds, point) => {
+        const c = worldToCamera(point);
+        bounds.minX = Math.min(bounds.minX, c.x);
+        bounds.maxX = Math.max(bounds.maxX, c.x);
+        bounds.minY = Math.min(bounds.minY, c.y);
+        bounds.maxY = Math.max(bounds.maxY, c.y);
+        return bounds;
+      }, {
+        minX: Infinity,
+        maxX: -Infinity,
+        minY: Infinity,
+        maxY: -Infinity
+      });
+    }
+
+    function syncOverlaySpacing() {
+      const statusRect = elementRect("statusPanel");
+      const bottomGap = window.innerWidth <= 560 ? 8 : 12;
+      const clearance = statusRect ? statusRect.height + bottomGap + 12 : 72;
+      document.documentElement.style.setProperty("--status-clearance", `${clearance}px`);
+
+      if (window.innerWidth <= 780) {
+        const legendRect = elementRect("legend");
+        const metricsRect = elementRect("metrics");
+        if (legendRect && metricsRect) {
+          const maxHeight = Math.max(40, legendRect.top - metricsRect.top - 12);
+          document.documentElement.style.setProperty("--metrics-max-height", `${maxHeight}px`);
+          return;
+        }
+      }
+      document.documentElement.style.setProperty("--metrics-max-height", "none");
+    }
+
+    function elementRect(id) {
+      const el = document.getElementById(id);
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      return rect.width && rect.height ? rect : null;
+    }
+
+    function overlapsHorizontally(rect, left, right) {
+      return right > rect.left && left < rect.right;
+    }
+
+    function insetYWithoutOverlayCollision(height, left, right, dpr, preferredBottom = 54) {
+      const gap = 12;
+      const cssHeight = height / dpr;
+      const leftCss = left / dpr;
+      const rightCss = right / dpr;
+      let topLimit = gap;
+      let bottomLimit = window.innerHeight - preferredBottom;
+
+      ["controls", "metrics"].forEach(id => {
+        const rect = elementRect(id);
+        if (rect && overlapsHorizontally(rect, leftCss, rightCss)) {
+          topLimit = Math.max(topLimit, rect.bottom + gap);
+        }
+      });
+
+      ["legend", "statusPanel"].forEach(id => {
+        const rect = elementRect(id);
+        if (rect && overlapsHorizontally(rect, leftCss, rightCss)) {
+          bottomLimit = Math.min(bottomLimit, rect.top - gap);
+        }
+      });
+
+      if (bottomLimit - topLimit < cssHeight) return null;
+      return (bottomLimit - cssHeight) * dpr;
+    }
+
+    function insetYNearTopWithoutOverlayCollision(height, left, right, dpr, preferredTop = 12, preferredBottom = 54) {
+      const gap = 12;
+      const cssHeight = height / dpr;
+      const leftCss = left / dpr;
+      const rightCss = right / dpr;
+      let topLimit = preferredTop;
+      let bottomLimit = window.innerHeight - preferredBottom;
+
+      ["controls", "metrics"].forEach(id => {
+        const rect = elementRect(id);
+        if (rect && overlapsHorizontally(rect, leftCss, rightCss)) {
+          topLimit = Math.max(topLimit, rect.bottom + gap);
+        }
+      });
+
+      ["legend", "statusPanel"].forEach(id => {
+        const rect = elementRect(id);
+        if (rect && overlapsHorizontally(rect, leftCss, rightCss)) {
+          bottomLimit = Math.min(bottomLimit, rect.top - gap);
+        }
+      });
+
+      if (bottomLimit - topLimit < cssHeight) {
+        return insetYWithoutOverlayCollision(height, left, right, dpr, preferredBottom);
+      }
+      return topLimit * dpr;
+    }
+
+    function worldToCamera(p) {
+      const x = p.x / 1000 - 25;
+      const y = p.y / 1000 - 12;
+      const z = p.z / 1000 * VERTICAL_EXAGGERATION;
+      const cy = Math.cos(camera.yaw);
+      const sy = Math.sin(camera.yaw);
+      const cp = Math.cos(camera.pitch);
+      const sp = Math.sin(camera.pitch);
+      const x1 = x * cy - y * sy;
+      const y1 = x * sy + y * cy;
+      const z1 = z;
+      const y2 = y1 * cp - z1 * sp;
+      const z2 = y1 * sp + z1 * cp;
+      return { x: x1, y: y2, depth: z2 };
+    }
+
+    function project(p) {
+      const c = worldToCamera(p);
+      return {
+        x: camera.cx + c.x * camera.scale,
+        y: camera.cy - c.y * camera.scale,
+        depth: c.depth,
+        scale: ORTHOGRAPHIC_PROJECTION_SCALE
+      };
+    }
+
+    function drawBackground() {
+      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      grad.addColorStop(0, "#0b5f83");
+      grad.addColorStop(0.34, "#07213b");
+      grad.addColorStop(1, "#020614");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const radial = ctx.createRadialGradient(canvas.width * 0.45, canvas.height * 0.1, 40, canvas.width * 0.45, canvas.height * 0.18, canvas.width * 0.86);
+      radial.addColorStop(0, "rgba(100,232,255,0.18)");
+      radial.addColorStop(1, "rgba(2,6,20,0)");
+      ctx.fillStyle = radial;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function drawLine3(a, b, style, width = 1, alpha = 1) {
+      const pa = project(a);
+      const pb = project(b);
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = style;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    function rectsOverlap(a, b, gap = 0) {
+      return a.x < b.x + b.w + gap
+        && a.x + a.w + gap > b.x
+        && a.y < b.y + b.h + gap
+        && a.y + a.h + gap > b.y;
+    }
+
+    function labelRectFor(text, x, y, fontPx, dpr) {
+      const metrics = ctx.measureText(text);
+      const ascent = metrics.actualBoundingBoxAscent || fontPx * dpr * 0.78;
+      const descent = metrics.actualBoundingBoxDescent || fontPx * dpr * 0.24;
+      const paddingX = 4 * dpr;
+      const paddingY = 2.5 * dpr;
+      return {
+        x: x - paddingX,
+        y: y - ascent - paddingY,
+        w: metrics.width + paddingX * 2,
+        h: ascent + descent + paddingY * 2,
+        textX: x,
+        textY: y,
+        paddingX,
+        paddingY
+      };
+    }
+
+    function clampLabelRect(rect, dpr) {
+      const margin = 8 * dpr;
+      const shiftX = clamp(rect.x, margin, Math.max(margin, canvas.width - rect.w - margin)) - rect.x;
+      const shiftY = clamp(rect.y, margin, Math.max(margin, canvas.height - rect.h - margin)) - rect.y;
+      return {
+        ...rect,
+        x: rect.x + shiftX,
+        y: rect.y + shiftY,
+        textX: rect.textX + shiftX,
+        textY: rect.textY + shiftY
+      };
+    }
+
+    function syncSceneLabelBlockRects() {
+      const dpr = window.devicePixelRatio || 1;
+      sceneLabelBlockRects.length = 0;
+      ["controls", "metrics", "legend", "statusPanel"].forEach(id => {
+        const rect = elementRect(id);
+        if (!rect) return;
+        sceneLabelBlockRects.push({
+          x: rect.left * dpr,
+          y: rect.top * dpr,
+          w: rect.width * dpr,
+          h: rect.height * dpr
+        });
+      });
+    }
+
+    function drawScreenLabel(text, x, y, color, options = {}) {
+      const dpr = window.devicePixelRatio || 1;
+      const fontPx = options.fontPx || 12;
+      const weight = options.weight || 800;
+      const reserve = options.reserve !== false;
+      const gap = (options.gapPx || 4) * dpr;
+      const line = fontPx * 1.35 * dpr;
+      const shifts = options.shifts || [
+        [0, 0],
+        [0, -line],
+        [0, line],
+        [14 * dpr, -line],
+        [-14 * dpr, -line],
+        [14 * dpr, line],
+        [-14 * dpr, line],
+        [0, -line * 2],
+        [0, line * 2],
+        [0, -line * 3],
+        [0, -line * 4],
+        [36 * dpr, -line * 3],
+        [-36 * dpr, -line * 3],
+        [28 * dpr, 0],
+        [-28 * dpr, 0]
+      ];
+
+      ctx.save();
+      ctx.font = `${weight} ${fontPx * dpr}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.textBaseline = "alphabetic";
+
+      let chosen = null;
+      for (const [sx, sy] of shifts) {
+        const candidate = clampLabelRect(labelRectFor(text, x + sx, y + sy, fontPx, dpr), dpr);
+        const occupied = sceneLabelRects.concat(sceneLabelBlockRects);
+        if (!reserve || !occupied.some(rect => rectsOverlap(candidate, rect, gap))) {
+          chosen = candidate;
+          break;
+        }
+        if (!chosen) chosen = candidate;
+      }
+
+      if (options.background) {
+        ctx.fillStyle = options.backgroundColor || "rgba(2, 10, 20, 0.48)";
+        ctx.strokeStyle = options.borderColor || "rgba(190, 242, 255, 0.16)";
+        ctx.lineWidth = 1 * dpr;
+        roundRect(ctx, chosen.x, chosen.y, chosen.w, chosen.h, 5 * dpr);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = color;
+      ctx.shadowColor = "rgba(0,0,0,0.86)";
+      ctx.shadowBlur = 8 * dpr;
+      ctx.fillText(text, chosen.textX, chosen.textY);
+      ctx.restore();
+
+      if (reserve) sceneLabelRects.push(chosen);
+    }
+
+    function drawLabel3(p, text, color, dx = 0, dy = 0, options = {}) {
+      const pp = project(p);
+      const dpr = window.devicePixelRatio || 1;
+      drawScreenLabel(text, pp.x + dx * dpr, pp.y + dy * dpr, color, options);
+    }
+
+    function drawCameraReadout() {
+      const dpr = window.devicePixelRatio || 1;
+      const text = `cam yaw ${camera.yaw.toFixed(2)}  pitch ${camera.pitch.toFixed(2)}  zoom ${camera.zoom.toFixed(2)}x`;
+      const controlsRect = elementRect("controls");
+      const metricsRect = elementRect("metrics");
+
+      ctx.save();
+      ctx.font = `${10 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+      const paddingX = 7 * dpr;
+      const paddingY = 4 * dpr;
+      const w = ctx.measureText(text).width + paddingX * 2;
+      const h = 18 * dpr;
+      const maxX = canvas.width - w - 12 * dpr;
+      const preferredX = Math.max(12, (controlsRect ? controlsRect.right + 12 : 12)) * dpr;
+      const boxX = clamp(preferredX, 12 * dpr, Math.max(12 * dpr, maxX));
+      const leftCss = boxX / dpr;
+      const rightCss = (boxX + w) / dpr;
+      let topClearance = controlsRect ? controlsRect.bottom + 10 : 12;
+      if (metricsRect && overlapsHorizontally(metricsRect, leftCss, rightCss)) {
+        topClearance = Math.max(topClearance, metricsRect.bottom + 10);
+      }
+      const boxY = Math.min(window.innerHeight - 76, topClearance) * dpr;
+      ctx.fillStyle = "rgba(2, 10, 20, 0.46)";
+      ctx.strokeStyle = "rgba(143,211,232,0.20)";
+      ctx.lineWidth = 1 * dpr;
+      roundRect(ctx, boxX, boxY, w, h, 6 * dpr);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "rgba(206, 240, 248, 0.88)";
+      ctx.fillText(text, boxX + paddingX, boxY + h - paddingY - 1 * dpr);
+      ctx.restore();
+    }
+
+    function drawBoundingBox() {
+      const x0 = DOMAIN.xMin;
+      const x1 = DOMAIN.xMax;
+      const y0 = DOMAIN.yMin;
+      const y1 = DOMAIN.yMax;
+      const z0 = DOMAIN.zMin;
+      const z1 = DOMAIN.zMax;
+      const corners = [
+        { x: x0, y: y0, z: z0 }, { x: x1, y: y0, z: z0 },
+        { x: x1, y: y1, z: z0 }, { x: x0, y: y1, z: z0 },
+        { x: x0, y: y0, z: z1 }, { x: x1, y: y0, z: z1 },
+        { x: x1, y: y1, z: z1 }, { x: x0, y: y1, z: z1 }
+      ];
+      const edges = [
+        [0, 1], [1, 2], [2, 3], [3, 0],
+        [4, 5], [5, 6], [6, 7], [7, 4],
+        [0, 4], [1, 5], [2, 6], [3, 7]
+      ];
+      for (const [a, b] of edges) {
+        drawLine3(corners[a], corners[b], "rgba(177,239,255,0.32)", 1, 1);
+      }
+
+      for (let xKm = 0; xKm <= 50; xKm += 10) {
+        const x = xKm * 1000;
+        drawLine3({ x, y: y0, z: z0 }, { x, y: y0, z: z0 + 110 }, "rgba(177,239,255,0.34)", 1, 1);
+        drawLabel3({ x, y: y0, z: z0 + 200 }, `${xKm}`, "#a7d9e6", -5, 16);
+      }
+      for (let yKm = 0; yKm <= 24; yKm += 6) {
+        const y = yKm * 1000;
+        drawLine3({ x: x0, y, z: z0 }, { x: x0, y, z: z0 + 110 }, "rgba(177,239,255,0.34)", 1, 1);
+        drawLabel3({ x: x0, y, z: z0 + 260 }, `${yKm}`, "#a7d9e6", 4, 14);
+      }
+      for (let z = 0; z <= 3000; z += 1000) {
+        drawLine3({ x: x0, y: y0, z }, { x: x0 + 800, y: y0, z }, "rgba(177,239,255,0.34)", 1, 1);
+        drawLabel3({ x: x0 + 1200, y: y0, z }, `${z} m`, "#a7d9e6", 2, 3);
+      }
+      const axisLabelOptions = { background: true, fontPx: 12, gapPx: 7 };
+      drawLabel3({ x: 25000, y: -900, z: 0 }, "range x (km)", "#dff8ff", -40, -6, axisLabelOptions);
+      drawLabel3({ x: -1200, y: 12000, z: 0 }, "cross-range y (km)", "#dff8ff", -32, -6, axisLabelOptions);
+      drawLabel3({ x: 0, y: 0, z: 3150 }, "depth z (m)", "#dff8ff", 8, 0, axisLabelOptions);
+    }
+
+    function drawSurfacePlane() {
+      const pts = [
+        project({ x: DOMAIN.xMin, y: DOMAIN.yMin, z: 0 }),
+        project({ x: DOMAIN.xMax, y: DOMAIN.yMin, z: 0 }),
+        project({ x: DOMAIN.xMax, y: DOMAIN.yMax, z: 0 }),
+        project({ x: DOMAIN.xMin, y: DOMAIN.yMax, z: 0 })
+      ];
+      ctx.save();
+      ctx.fillStyle = "rgba(116, 227, 255, 0.10)";
+      ctx.strokeStyle = "rgba(157, 236, 255, 0.22)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i += 1) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      drawLabel3({ x: 47000, y: 22000, z: 0 }, "surface z=0", "#bff5ff", -20, -8);
+    }
+
+    function drawSeabedCell(item, dpr, elevated = false) {
+      const shade = item.cell.shade;
+      const relief = item.cell.relief;
+      const slope = item.cell.slope;
+      const summit = item.cell.summit;
+      const footShadow = relief > 0.08 && relief < 0.36 ? 1 : 0;
+      const r = Math.round(98 + 49 * shade + 12 * relief + 45 * summit - 7 * footShadow);
+      const g = Math.round(88 + 37 * shade + 8 * relief + 34 * summit - 6 * footShadow);
+      const b = Math.round(45 + 18 * shade + 3 * relief + 10 * summit - 3 * footShadow);
+      const ridgeAlpha = elevated
+        ? Math.min(0.42, 0.16 + 0.18 * relief + 0.12 * summit)
+        : relief > 0.34 || slope > 0.42 || summit > 0
+          ? 0.07 + 0.08 * relief + 0.08 * summit
+          : 0.055;
+
+      ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+      ctx.strokeStyle = `rgba(239,218,128,${ridgeAlpha})`;
+      ctx.lineWidth = (summit > 0.2 ? 0.82 : relief > 0.54 ? 0.62 : 0.5) * dpr;
+      ctx.beginPath();
+      ctx.moveTo(item.projected[0].x, item.projected[0].y);
+      for (let i = 1; i < item.projected.length; i += 1) ctx.lineTo(item.projected[i].x, item.projected[i].y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    function drawSeabed() {
+      const cells = state.seabedMesh.map(cell => {
+        const projected = cell.points.map(project);
+        const avgDepth = projected.reduce((sum, p) => sum + p.depth, 0) / projected.length;
+        return { cell, projected, avgDepth };
+      }).sort((a, b) => a.avgDepth - b.avgDepth);
+      const dpr = window.devicePixelRatio || 1;
+      const baseCells = cells.filter(item => item.cell.relief < 0.12);
+      const elevatedCells = cells.filter(item => item.cell.relief >= 0.12);
+
+      ctx.save();
+      for (const item of baseCells) drawSeabedCell(item, dpr, false);
+      for (const item of elevatedCells) drawSeabedCell(item, dpr, true);
+      ctx.restore();
+      drawSeamountSummitCaps(cells);
+      drawLabel3({ x: 18300, y: 12200, z: bathymetry(18300, 12200) - 120 }, "seamount", "#fff0a7", -24, -8);
+      drawLabel3({ x: 34200, y: 9000, z: bathymetry(34200, 9000) - 140 }, "offset seabed peak", "#fff0a7", -38, -10);
+      drawLabel3({ x: 42000, y: 21000, z: bathymetry(42000, 21000) }, "seabed D(x,y)", "#e9dfa0", -36, 12);
+    }
+
+    function drawSeamountSummitCaps(cells) {
+      ctx.save();
+      for (const item of cells) {
+        const { relief, shade, summit } = item.cell;
+        if (summit < 0.16) continue;
+        const r = Math.round(108 + 45 * shade + 10 * relief + 38 * summit);
+        const g = Math.round(96 + 34 * shade + 7 * relief + 28 * summit);
+        const b = Math.round(48 + 16 * shade + 3 * relief + 8 * summit);
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        ctx.strokeStyle = `rgba(245,225,139,${0.12 + 0.08 * summit})`;
+        ctx.lineWidth = (0.55 + 0.18 * summit) * (window.devicePixelRatio || 1);
+        ctx.beginPath();
+        ctx.moveTo(item.projected[0].x, item.projected[0].y);
+        for (let i = 1; i < item.projected.length; i += 1) ctx.lineTo(item.projected[i].x, item.projected[i].y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawVolume() {
+      if (!state.volumePoints.length) return;
+      const alpha = Number(opacitySlider.value) / 100;
+      if (alpha <= 0.01) return;
+      const useTl = tlToggle.checked;
+      colorbarEl.classList.toggle("show", useTl);
+      ctx.save();
+      ctx.shadowBlur = 0;
+      for (const p of state.volumePoints) {
+        const pr = project(p);
+        const a = alpha * (useTl ? 0.64 : 0.38);
+        ctx.fillStyle = useTl ? tlColor(p.tl, a) : `rgba(72, 223, 255, ${a})`;
+        const size = clamp(1.5 * (window.devicePixelRatio || 1) * pr.scale, 1, 2.6);
+        ctx.fillRect(pr.x - size * 0.5, pr.y - size * 0.5, size, size);
+      }
+      ctx.restore();
+    }
+
+    function interpolateRayAtTime(points, time) {
+      if (!points.length || time <= points[0].t) return points[0];
+      for (let i = 1; i < points.length; i += 1) {
+        if (points[i].t >= time) {
+          const a = points[i - 1];
+          const b = points[i];
+          const u = (time - a.t) / Math.max(0.0001, b.t - a.t);
+          return {
+            x: lerp(a.x, b.x, u),
+            y: lerp(a.y, b.y, u),
+            z: lerp(a.z, b.z, u),
+            t: time,
+            tl: lerp(a.tl, b.tl, u)
+          };
+        }
+      }
+      return points[points.length - 1];
+    }
+
+    function indexAtTime(points, time) {
+      let lo = 0;
+      let hi = points.length - 1;
+      if (time <= points[0].t) return 0;
+      if (time >= points[hi].t) return hi;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (points[mid].t <= time) lo = mid;
+        else hi = mid - 1;
+      }
+      return lo;
+    }
+
+    function drawRays() {
+      if (!state.rays.length || state.currentTime <= 0.02) return;
+      const dpr = window.devicePixelRatio || 1;
+      const rayDisplayStride = state.rays.length > 1600 ? 2 : 1;
+      ctx.save();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      for (const ray of state.rays) {
+        if (!ray.eigen && ray.id % rayDisplayStride !== 0) continue;
+        const points = ray.points;
+        if (!points || points.length < 2) continue;
+        const endIndex = indexAtTime(points, state.currentTime);
+        let hasStarted = false;
+        ctx.beginPath();
+        const stride = ray.eigen ? 1 : 5;
+        for (let i = 0; i <= endIndex; i += stride) {
+          const p = points[i];
+          const pp = project(p);
+          if (!hasStarted) {
+            ctx.moveTo(pp.x, pp.y);
+            hasStarted = true;
+          } else {
+            ctx.lineTo(pp.x, pp.y);
+          }
+        }
+        if (endIndex > 0 && endIndex % stride !== 0) {
+          const pp = project(points[endIndex]);
+          if (!hasStarted) {
+            ctx.moveTo(pp.x, pp.y);
+            hasStarted = true;
+          } else {
+            ctx.lineTo(pp.x, pp.y);
+          }
+        }
+        if (hasStarted) {
+          ctx.globalAlpha = ray.eigen ? 0.96 : RAY_ALPHA;
+          ctx.strokeStyle = ray.eigen ? "#ffffff" : ray.color;
+          ctx.lineWidth = (ray.eigen ? 2.4 : 1.02) * dpr;
+          ctx.shadowColor = ray.eigen ? "rgba(255,255,255,0.65)" : "transparent";
+          ctx.shadowBlur = ray.eigen ? 9 : 0;
+          ctx.stroke();
+        }
+
+        const head = interpolateRayAtTime(points, state.currentTime);
+        if (head && head.t <= points[points.length - 1].t) {
+          const hp = project(head);
+          ctx.globalAlpha = ray.eigen ? 1 : 0.74;
+          ctx.fillStyle = ray.eigen ? "#ffffff" : ray.color;
+          ctx.shadowColor = ctx.fillStyle;
+          ctx.shadowBlur = ray.eigen ? 12 : 0;
+          ctx.beginPath();
+          ctx.arc(hp.x, hp.y, (ray.eigen ? 3.4 : 2.3) * dpr * hp.scale, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+
+    function drawSphere(p, radiusPx, fill, glow, label, labelColor, ring) {
+      const pp = project(p);
+      const dpr = window.devicePixelRatio || 1;
+      const r = radiusPx * dpr * pp.scale;
+      ctx.save();
+      ctx.shadowColor = glow;
+      ctx.shadowBlur = 18 * dpr;
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.arc(pp.x, pp.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      if (ring) {
+        ctx.shadowBlur = 8 * dpr;
+        ctx.strokeStyle = ring;
+        ctx.lineWidth = 2.2 * dpr;
+        ctx.beginPath();
+        ctx.arc(pp.x, pp.y, r + 6 * dpr, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+      drawScreenLabel(label, pp.x + 9 * dpr, pp.y - 9 * dpr, labelColor, {
+        background: true,
+        fontPx: 13,
+        gapPx: 7
+      });
+    }
+
+    function drawEndpoints() {
+      drawSphere(SOURCE, 5.2, "#fff8d9", "rgba(255, 231, 151, 0.85)", "S source", "#fff8d9", null);
+      const reached = state.metrics && state.metrics.reached;
+      drawSphere(RECEIVER, 5.0, "#67e8ff", "rgba(82, 228, 255, 0.82)", "R receiver", "#bff7ff", reached ? "#6dff9d" : "#ff5b6c");
+    }
+
+    function drawCrossSectionInset() {
+      if (!state.showCrossSection) return;
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.min(350 * dpr, canvas.width * 0.30);
+      const h = 164 * dpr;
+      const insetMargin = 14 * dpr;
+      const preferredLeft = insetMargin;
+      const maxX = Math.max(12 * dpr, canvas.width - w - 18 * dpr);
+      const x0 = clamp(preferredLeft, 12 * dpr, maxX);
+      const y0 = insetYWithoutOverlayCollision(h, x0, x0 + w, dpr)
+        ?? insetYNearTopWithoutOverlayCollision(h, x0, x0 + w, dpr);
+      if (x0 < 12 * dpr) return;
+      if (y0 === null) return;
+
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 10, 20, 0.64)";
+      ctx.strokeStyle = "rgba(143,211,232,0.22)";
+      ctx.lineWidth = 1 * dpr;
+      roundRect(ctx, x0, y0, w, h, 8 * dpr);
+      ctx.fill();
+      ctx.stroke();
+
+      const padL = 28 * dpr;
+      const padR = 12 * dpr;
+      const padT = 24 * dpr;
+      const padB = 23 * dpr;
+      const plotW = w - padL - padR;
+      const plotH = h - padT - padB;
+
+      ctx.fillStyle = "#c6ecf5";
+      ctx.font = `${11 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.fillText("Centerline y=12 km cross-section", x0 + padL, y0 + 17 * dpr);
+      ctx.strokeStyle = "rgba(160,226,244,0.18)";
+      ctx.beginPath();
+      for (let z = 0; z <= 3000; z += 1000) {
+        const py = y0 + padT + z / 3000 * plotH;
+        ctx.moveTo(x0 + padL, py);
+        ctx.lineTo(x0 + padL + plotW, py);
+      }
+      ctx.stroke();
+
+      ctx.strokeStyle = "#c7b86a";
+      ctx.lineWidth = 1.7 * dpr;
+      ctx.beginPath();
+      state.crossSection.forEach((sample, i) => {
+        const px = x0 + padL + sample.x / DOMAIN.xMax * plotW;
+        const py = y0 + padT + sample.z / DOMAIN.zMax * plotH;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+
+      ctx.globalAlpha = 0.62;
+      ctx.lineWidth = 0.8 * dpr;
+      for (const ray of state.rays) {
+        if (Math.abs(ray.azDeg) > 0.55) continue;
+        ctx.strokeStyle = ray.color;
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < ray.points.length; i += 3) {
+          const p = ray.points[i];
+          if (p.t > state.currentTime) break;
+          const px = x0 + padL + p.x / DOMAIN.xMax * plotW;
+          const py = y0 + padT + p.z / DOMAIN.zMax * plotH;
+          if (!started) {
+            ctx.moveTo(px, py);
+            started = true;
+          } else {
+            ctx.lineTo(px, py);
+          }
+        }
+        if (started) ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+
+      const sx = x0 + padL + SOURCE.x / DOMAIN.xMax * plotW;
+      const sy = y0 + padT + SOURCE.z / DOMAIN.zMax * plotH;
+      const rx = x0 + padL + RECEIVER.x / DOMAIN.xMax * plotW;
+      const ry = y0 + padT + RECEIVER.z / DOMAIN.zMax * plotH;
+      ctx.fillStyle = "#fff8d9";
+      ctx.beginPath();
+      ctx.arc(sx, sy, 4 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = state.metrics && state.metrics.reached ? "#6dff9d" : "#ff5b6c";
+      ctx.beginPath();
+      ctx.arc(rx, ry, 4 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#9bcdd8";
+      ctx.font = `${9 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.fillText("0", x0 + padL - 16 * dpr, y0 + padT + 4 * dpr);
+      ctx.fillText("3000m", x0 + padL - 28 * dpr, y0 + padT + plotH);
+      ctx.fillText("50 km", x0 + padL + plotW - 30 * dpr, y0 + padT + plotH + 16 * dpr);
+      ctx.restore();
+    }
+
+    function drawArrivalsInset() {
+      if (!state.showArrivals) return;
+      const m = state.metrics;
+      if (!m) return;
+      const arrivals = m.eigenrays;
+      const dpr = window.devicePixelRatio || 1;
+      const w = 210 * dpr;
+      const h = 108 * dpr;
+      const insetMargin = 14 * dpr;
+      const insetGap = 12 * dpr;
+      const crossSectionInsetW = state.showCrossSection ? Math.min(350 * dpr, canvas.width * 0.30) : 0;
+      const preferredLeft = insetMargin + (crossSectionInsetW ? crossSectionInsetW + insetGap : 0);
+      const maxX = Math.max(12 * dpr, canvas.width - w - 18 * dpr);
+      const x0 = clamp(preferredLeft, 12 * dpr, maxX);
+      const y0 = insetYWithoutOverlayCollision(h, x0, x0 + w, dpr);
+      if (y0 === null) return;
+
+      ctx.save();
+      ctx.fillStyle = "rgba(2, 10, 20, 0.58)";
+      ctx.strokeStyle = "rgba(143,211,232,0.22)";
+      ctx.lineWidth = 1 * dpr;
+      roundRect(ctx, x0, y0, w, h, 8 * dpr);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#c6ecf5";
+      ctx.font = `${11 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.fillText("Arrivals at R", x0 + 10 * dpr, y0 + 18 * dpr);
+
+      const pad = 24 * dpr;
+      const plotX = x0 + pad;
+      const plotY = y0 + 30 * dpr;
+      const plotW = w - pad - 12 * dpr;
+      const plotH = h - 42 * dpr;
+      ctx.strokeStyle = "rgba(180,230,243,0.28)";
+      ctx.beginPath();
+      ctx.moveTo(plotX, plotY);
+      ctx.lineTo(plotX, plotY + plotH);
+      ctx.lineTo(plotX + plotW, plotY + plotH);
+      ctx.stroke();
+
+      if (!arrivals.length) {
+        ctx.fillStyle = "#ffb3bd";
+        ctx.font = `${10 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.fillText("No eigenrays within 250 m", plotX + 5 * dpr, plotY + 31 * dpr);
+      } else {
+        const minT = Math.min(...arrivals.map(a => a.time));
+        const maxT = Math.max(...arrivals.map(a => a.time));
+        const minTl = Math.min(...arrivals.map(a => a.tl));
+        const maxTl = Math.max(...arrivals.map(a => a.tl));
+        const shown = arrivals.slice(0, 18);
+        shown.forEach((a, index) => {
+          let xFrac = maxT === minT ? 0.5 : (a.time - minT) / (maxT - minT);
+          if (maxT - minT < 0.015 && shown.length > 1) {
+            xFrac = 0.5 + (index - (shown.length - 1) / 2) * 0.026;
+          }
+          const tx = plotX + clamp(xFrac, 0.08, 0.92) * plotW;
+          const amp = maxTl === minTl ? 0.8 : 1 - (a.tl - minTl) / (maxTl - minTl + 0.001);
+          const stemH = Math.max(8 * dpr, amp * plotH);
+          ctx.strokeStyle = index % 2 === 0 ? "#dffcff" : tlColor(a.tl, 0.96);
+          ctx.lineWidth = 2.6 * dpr;
+          ctx.beginPath();
+          ctx.moveTo(tx, plotY + plotH);
+          ctx.lineTo(tx, plotY + plotH - stemH);
+          ctx.stroke();
+        });
+      }
+      ctx.fillStyle = "#9bcdd8";
+      ctx.font = `${9 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.fillText("time", plotX + plotW - 21 * dpr, plotY + plotH + 12 * dpr);
+      ctx.fillText("amp", plotX - 21 * dpr, plotY + 6 * dpr);
+      ctx.restore();
+    }
+
+    function roundRect(context, x, y, w, h, r) {
+      const rr = Math.min(r, w / 2, h / 2);
+      context.beginPath();
+      context.moveTo(x + rr, y);
+      context.arcTo(x + w, y, x + w, y + h, rr);
+      context.arcTo(x + w, y + h, x, y + h, rr);
+      context.arcTo(x, y + h, x, y, rr);
+      context.arcTo(x, y, x + w, y, rr);
+      context.closePath();
+    }
+
+    function render(now) {
+      resizeCanvas();
+      syncOverlaySpacing();
+      const dt = Math.min(0.08, (now - state.lastFrameMs) / 1000);
+      state.lastFrameMs = now;
+      if (state.playing) {
+        const speed = Number(speedSelect.value);
+        state.currentTime = Math.min(state.maxTime, state.currentTime + dt * speed);
+        if (state.currentTime >= state.maxTime) {
+          state.playing = false;
+          playBtn.textContent = "Play";
+        }
+        timeSlider.value = String(state.currentTime);
+        timeOut.textContent = `${state.currentTime.toFixed(1)} s`;
+      }
+
+      state.frameCount += 1;
+      if (now - state.fpsWindowStart > 700) {
+        state.fps = state.frameCount * 1000 / (now - state.fpsWindowStart);
+        state.frameCount = 0;
+        state.fpsWindowStart = now;
+        if (state.metrics) {
+          state.metrics.fileSizeKb = estimateFileSizeKb();
+          updateMetricsPanel();
+        }
+      }
+
+      sceneLabelRects.length = 0;
+      syncSceneLabelBlockRects();
+      drawBackground();
+      drawSurfacePlane();
+      drawVolume();
+      drawSeabed();
+      drawBoundingBox();
+      drawCameraReadout();
+      drawRays();
+      drawEndpoints();
+      drawCrossSectionInset();
+      drawArrivalsInset();
+
+      requestAnimationFrame(render);
+    }
+
+    function performTrace() {
+      if (state.tracing) return;
+      state.tracing = true;
+      state.playing = false;
+      playBtn.textContent = "Play";
+      colorbarEl.classList.toggle("show", tlToggle.checked);
+      const elevBeams = Number(elevSlider.value);
+      const azBeams = Number(azSlider.value);
+      statusEl.textContent = `Tracing ${elevBeams} x ${azBeams} rays and TL grid...`;
+      updateMetricsPanel();
+
+      setTimeout(() => {
+        try {
+          const trace = traceFan(elevBeams, azBeams, {
+            origin: SOURCE,
+            target: RECEIVER,
+            forward: { x: 1, y: 0, z: 0 },
+            store: true,
+            makeField: true,
+            ds: CANONICAL.ds,
+            maxSteps: CANONICAL.maxSteps,
+            depositStride: 1
+          });
+          state.rays = trace.rays;
+          state.field = trace.field;
+          state.maxTime = Math.max(1, trace.maxTime);
+          state.currentTime = 0;
+          timeSlider.max = String(Math.ceil(state.maxTime * 10) / 10);
+          timeSlider.value = "0";
+          timeOut.textContent = "0.0 s";
+          state.volumePoints = buildVolumePoints(trace.field);
+          state.metrics = makeMetrics(trace);
+          statusEl.textContent = `Trace complete in ${(trace.elapsedMs / 1000).toFixed(2)} s. Drag to orbit, scroll to zoom.`;
+          updateMetricsPanel();
+          postMetrics();
+          runSelfChecks(trace);
+        } catch (error) {
+          console.error(error);
+          statusEl.textContent = `Trace failed: ${error.message}`;
+        } finally {
+          state.tracing = false;
+        }
+      }, 30);
+    }
+
+    function runSelfChecks(canonicalTrace) {
+      if (!state.metrics) return;
+      statusEl.textContent = "Trace complete. Running reciprocity and 2x convergence checks...";
+      setTimeout(() => {
+        const reverseForward = {
+          x: SOURCE.x - RECEIVER.x,
+          y: SOURCE.y - RECEIVER.y,
+          z: SOURCE.z - RECEIVER.z
+        };
+        const reciprocal = traceFan(CANONICAL.elevBeams, CANONICAL.azBeams, {
+          origin: RECEIVER,
+          target: SOURCE,
+          forward: reverseForward,
+          store: false,
+          makeField: false,
+          ds: CANONICAL.ds * 1.15,
+          maxSteps: CANONICAL.maxSteps
+        });
+        const reciprocalTl = reciprocal.nearest.tl;
+        state.metrics.reciprocalTlDb = reciprocalTl;
+        state.metrics.reciprocityErrorDb = Math.abs(state.metrics.tlRDb - reciprocalTl);
+        updateMetricsPanel();
+        postMetrics();
+
+        setTimeout(() => {
+          const dense = traceFan(CANONICAL.elevBeams * 2, CANONICAL.azBeams * 2, {
+            origin: SOURCE,
+            target: RECEIVER,
+            forward: { x: 1, y: 0, z: 0 },
+            store: false,
+            makeField: true,
+            ds: CANONICAL.ds * 1.35,
+            maxSteps: Math.ceil(CANONICAL.maxSteps / 1.2),
+            depositStride: 2
+          });
+          const denseTlR = computeTlAtPoint(dense.field, RECEIVER);
+          const denseTl = dense.nearest.dist <= CANONICAL.eigenToleranceM || denseTlR <= CANONICAL.shadowCutoffDb
+            ? Math.min(dense.nearest.tl, denseTlR)
+            : CANONICAL.shadowCutoffDb + Math.max(0, dense.nearest.dist - CANONICAL.eigenToleranceM) / 120;
+          state.metrics.convergenceCoverageDeltaPct =
+            (dense.coverage.reachedFraction - canonicalTrace.coverage.reachedFraction) * 100;
+          state.metrics.convergenceTlDeltaDb = denseTl - state.metrics.tlRDb;
+          statusEl.textContent = `Self-checks complete. Reciprocity ${state.metrics.reciprocityErrorDb.toFixed(2)} dB, convergence ${state.metrics.convergenceCoverageDeltaPct.toFixed(2)} pct.`;
+          updateMetricsPanel();
+          postMetrics();
+        }, 30);
+      }, 30);
+    }
+
+    function scheduleTrace() {
+      clearTimeout(state.retraceTimer);
+      const elev = Number(elevSlider.value);
+      const az = Number(azSlider.value);
+      elevOut.textContent = String(elev);
+      azOut.textContent = String(az);
+      const canonical = elev === CANONICAL.elevBeams && az === CANONICAL.azBeams;
+      statusEl.textContent = canonical
+        ? "Canonical fan selected. Retracing..."
+        : "Off-canonical fan selected. Metric card will be flagged off-canonical.";
+      state.retraceTimer = setTimeout(performTrace, 500);
+    }
+
+    function togglePanel(targetName) {
+      const panel = {
+        controls: document.getElementById("controls"),
+        metrics: document.getElementById("metrics"),
+        legend: document.getElementById("legend"),
+        status: document.getElementById("statusPanel")
+      }[targetName];
+      if (!panel) return;
+      const button = document.querySelector(`[data-minimize-target="${targetName}"]`);
+      const minimized = panel.classList.toggle("is-minimized");
+      if (button) {
+        button.textContent = minimized ? "+" : "−";
+        button.setAttribute("aria-expanded", String(!minimized));
+        button.setAttribute("aria-label", minimized ? `Expand ${targetName}` : `Minimize ${targetName}`);
+      }
+    }
+
+    function toggleCanvasCard(kind) {
+      const isArrivals = kind === "arrivals";
+      const button = isArrivals ? arrivalsToggleBtn : sectionToggleBtn;
+      const nextValue = isArrivals ? !state.showArrivals : !state.showCrossSection;
+      if (isArrivals) state.showArrivals = nextValue;
+      else state.showCrossSection = nextValue;
+      button.classList.toggle("active", nextValue);
+      button.setAttribute("aria-pressed", String(nextValue));
+    }
+
+    function attachEvents() {
+      window.addEventListener("resize", resizeCanvas);
+
+      document.querySelectorAll("[data-minimize-target]").forEach(button => {
+        button.addEventListener("click", () => {
+          const target = button.getAttribute("data-minimize-target");
+          if (target === "arrivals" || target === "section") {
+            toggleCanvasCard(target);
+          } else {
+            togglePanel(target);
+          }
+        });
+      });
+
+      playBtn.addEventListener("click", () => {
+        if (state.tracing) return;
+        state.playing = !state.playing;
+        playBtn.textContent = state.playing ? "Pause" : "Play";
+      });
+
+      resetBtn.addEventListener("click", () => {
+        state.playing = false;
+        state.currentTime = 0;
+        timeSlider.value = "0";
+        timeOut.textContent = "0.0 s";
+        playBtn.textContent = "Play";
+      });
+
+      cameraBtn.addEventListener("click", resetCamera);
+
+      canonicalBtn.addEventListener("click", () => {
+        elevSlider.value = String(CANONICAL.elevBeams);
+        azSlider.value = String(CANONICAL.azBeams);
+        elevOut.textContent = String(CANONICAL.elevBeams);
+        azOut.textContent = String(CANONICAL.azBeams);
+        scheduleTrace();
+      });
+
+      elevSlider.addEventListener("input", scheduleTrace);
+      azSlider.addEventListener("input", scheduleTrace);
+
+      timeSlider.addEventListener("input", () => {
+        state.currentTime = Number(timeSlider.value);
+        timeOut.textContent = `${state.currentTime.toFixed(1)} s`;
+      });
+
+      opacitySlider.addEventListener("input", () => {
+        opacityOut.textContent = `${opacitySlider.value}%`;
+      });
+
+      tlToggle.addEventListener("change", () => {
+        colorbarEl.classList.toggle("show", tlToggle.checked);
+      });
+
+      canvas.addEventListener("pointerdown", event => {
+        canvas.setPointerCapture(event.pointerId);
+        state.pointer = {
+          id: event.pointerId,
+          x: event.clientX,
+          y: event.clientY,
+          yaw: camera.yaw,
+          pitch: camera.pitch
+        };
+      });
+
+      canvas.addEventListener("pointermove", event => {
+        if (!state.pointer || state.pointer.id !== event.pointerId) return;
+        const dx = event.clientX - state.pointer.x;
+        const dy = event.clientY - state.pointer.y;
+        camera.yaw = state.pointer.yaw + dx * 0.006;
+        camera.pitch = clamp(state.pointer.pitch + dy * 0.005, -1.08, 1.08);
+      });
+
+      canvas.addEventListener("pointerup", event => {
+        if (state.pointer && state.pointer.id === event.pointerId) state.pointer = null;
+      });
+
+      canvas.addEventListener("pointercancel", () => {
+        state.pointer = null;
+      });
+
+      canvas.addEventListener("wheel", event => {
+        event.preventDefault();
+        const factor = Math.exp(-event.deltaY * 0.001);
+        camera.zoom = clamp(camera.zoom * factor, 0.55, 2.4);
+      }, { passive: false });
+    }
+
+    function init() {
+      state.seabedMesh = buildSeabedMesh();
+      state.crossSection = buildCrossSection();
+      resizeCanvas();
+      attachEvents();
+      updateMetricsPanel();
+      requestAnimationFrame(render);
+      performTrace();
+    }
+
+    window.rayViewDebug = {
+      traceRay,
+      traceFan,
+      soundSpeed,
+      bathymetry,
+      bathymetryGradient,
+      camera,
+      constants: { DOMAIN, SOURCE, RECEIVER, CANONICAL, GRID, CAMERA_HOME, CAMERA_FRAME }
+    };
+
+    init();
+  </script>
+</body>
+</html>

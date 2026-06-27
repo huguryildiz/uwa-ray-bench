@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<!-- ============================================================================
+ HARNESS CHROME  (uwa-ray-bench)  — the "final UI" infra shell
+ -----------------------------------------------------------------------------
+ 2×2 model grid (top 63vh) + BELLHOP3D ref | scorecard row (bottom 32.5vh):
+   Fugu Ultra · Opus 4.8 max  (top row)
+   GPT 5.5 XH · Gemini 3.1 Pro  (second row)
+   BELLHOP3D ref | scorecard  (bottom row — #bottom-row, 2-col)
+ The four model panels are opaque outputs — loaded as iframes ONLY, never read.
+ harness.js aggregates each panel's postMessage({type:'ray_metrics',...}) card +
+ canonical-grid TL field and scores every model's TL RMSE / TL(R) error vs the
+ BELLHOP3D reference, plus synced camera/beam-stop, diff overlay, scorecard and an
+ analytic cursor readout. 100% static (vanilla JS; fonts self-hosted in ../fonts).
+ Visual language: CommSysLab — dark glassmorphism, neon signal palette,
+   Newsreader serif headings + IBM Plex Mono instrument readouts.
+============================================================================ -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UWA Ray-Propagation Benchmark — Console</title>
+<link rel="icon" href="data:,">
+<style>
+  @font-face{font-family:Newsreader;src:url(../fonts/newsreader-500.woff2) format('woff2');font-weight:500;font-display:swap}
+  @font-face{font-family:Newsreader;src:url(../fonts/newsreader-600.woff2) format('woff2');font-weight:600;font-display:swap}
+  @font-face{font-family:'IBM Plex Sans';src:url(../fonts/plexsans-400.woff2) format('woff2');font-weight:400;font-display:swap}
+  @font-face{font-family:'IBM Plex Sans';src:url(../fonts/plexsans-600.woff2) format('woff2');font-weight:600;font-display:swap}
+  @font-face{font-family:'IBM Plex Mono';src:url(../fonts/plexmono-400.woff2) format('woff2');font-weight:400;font-display:swap}
+  @font-face{font-family:'IBM Plex Mono';src:url(../fonts/plexmono-500.woff2) format('woff2');font-weight:500;font-display:swap}
+  :root{
+    --bg:#03030d;
+    --surface:rgba(255,255,255,.05);
+    --surface-2:rgba(255,255,255,.08);
+    --glass:rgba(12,14,36,.48);
+    --glass-2:rgba(8,10,28,.55);
+    --text:#eaeefc; --text-dim:#7a85b4; --text-faint:#434968;
+    --border:rgba(255,255,255,.10); --border-strong:rgba(255,255,255,.20);
+    --accent:#39ff85; --accent-2:#ff8c42; --accent-blue:#7b8cff; --accent-cyan:#2dd4bf;
+    --marker:#ff4f9a; --ok:#39ff85; --err:#ff5b6b; --warn:#ff8c42;
+    --radius:18px; --radius-sm:10px;
+    --blur:blur(28px) saturate(180%);
+    --blur-sm:blur(16px) saturate(160%);
+    --tr:.25s cubic-bezier(.4,0,.2,1);
+    --lift:0 24px 64px rgba(0,0,0,.60), 0 4px 18px rgba(0,0,0,.35);
+    --lift-sm:0 8px 28px rgba(0,0,0,.45);
+    --font:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+    --head:Newsreader,Georgia,'Times New Roman',serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,Consolas,monospace;}
+  *{box-sizing:border-box}
+  html{min-height:100%;
+    background:
+      radial-gradient(ellipse 1100px 700px at 8%  -5%, rgba(57,255,133,.16) 0%,transparent 60%),
+      radial-gradient(ellipse  800px 600px at 92% 108%,rgba(123,140,255,.20) 0%,transparent 55%),
+      radial-gradient(ellipse  650px 450px at 78%  18%,rgba(45,212,191,.11)  0%,transparent 50%),
+      radial-gradient(ellipse  500px 380px at 18%  88%,rgba(255,79,154,.08)  0%,transparent 50%),
+      radial-gradient(ellipse  400px 300px at 50%  50%,rgba(100,120,255,.04) 0%,transparent 60%),
+      var(--bg);
+    background-attachment:fixed}
+  body{margin:0;min-height:100%;display:flex;flex-direction:column;overflow-y:auto;
+    color:var(--text);font:13px/1.45 var(--font)}
+
+  /* ---------- top menu bar ---------- */
+  #bar{position:sticky;top:0;z-index:60;flex:none;height:56px;display:flex;align-items:center;gap:4px;padding:0 20px;
+    background:rgba(4,6,20,.42);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    border-bottom:1px solid var(--border);
+    box-shadow:0 1px 0 rgba(255,255,255,.06),0 12px 40px rgba(0,0,0,.50)}
+  #bar::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;
+    background:linear-gradient(90deg,transparent,var(--accent-blue) 30%,var(--accent) 50%,var(--accent-blue) 70%,transparent);opacity:.5}
+  .logo{width:30px;height:30px;flex:none;margin-right:11px;filter:drop-shadow(0 0 6px rgba(57,255,133,.35))}
+  .brand{display:flex;flex-direction:column;line-height:1;margin-right:14px;white-space:nowrap}
+  .brand b{font:600 19px/1 var(--head);letter-spacing:.01em;
+    background:linear-gradient(110deg,#eaeefc 0%,#b8c4ff 55%,#7b8cff 100%);
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .brand b em{font-style:italic;
+    background:linear-gradient(110deg,#39ff85 0%,#2dd4bf 100%);
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .brand span{font-size:8.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--text-dim);margin-top:3px}
+
+  /* menu-link items + dropdowns */
+  .lnk{appearance:none;background:none;border:0;cursor:pointer;color:var(--text-dim);
+    font:600 12px var(--font);letter-spacing:.02em;padding:8px 12px;border-radius:var(--radius-sm);
+    display:inline-flex;align-items:center;gap:6px;white-space:nowrap;transition:var(--tr)}
+  .lnk:hover{color:var(--text);background:rgba(255,255,255,.07);box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+  .lnk.act{color:var(--accent);text-shadow:0 0 14px rgba(57,255,133,.45)}
+  .lnk .k{font:500 11px var(--mono);opacity:.85}
+  details.menu{position:relative}
+  details.menu>summary{list-style:none;cursor:pointer;color:var(--text-dim);
+    font:600 12px var(--font);padding:8px 12px;border-radius:var(--radius-sm);
+    display:inline-flex;align-items:center;gap:6px;white-space:nowrap;transition:var(--tr)}
+  details.menu>summary::-webkit-details-marker{display:none}
+  details.menu>summary::after{content:"▾";font-size:9px;opacity:.6}
+  details.menu>summary:hover{color:var(--text);background:rgba(255,255,255,.07)}
+  details.menu[open]>summary{color:var(--text);background:rgba(255,255,255,.09)}
+  .pop{position:absolute;top:calc(100% + 10px);left:0;z-index:70;min-width:220px;
+    display:flex;flex-direction:column;gap:12px;padding:16px 16px;border-radius:var(--radius);
+    background:rgba(8,10,30,.52);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    border:1px solid var(--border);
+    box-shadow:var(--lift),inset 0 1px 0 rgba(255,255,255,.09)}
+  .pop .r{display:flex;align-items:center;justify-content:space-between;gap:12px;
+    font-size:11px;color:var(--text-dim)}
+  .vsep{width:1px;height:22px;background:var(--border);margin:0 6px}
+
+  select.sel{appearance:none;font:500 12px var(--mono);color:var(--text);cursor:pointer;
+    padding:6px 24px 6px 10px;border-radius:var(--radius-sm);
+    border:1px solid var(--border);
+    background:rgba(255,255,255,.06);
+    backdrop-filter:var(--blur-sm);-webkit-backdrop-filter:var(--blur-sm);
+    background-image:linear-gradient(45deg,transparent 50%,var(--text-dim) 50%),linear-gradient(135deg,var(--text-dim) 50%,transparent 50%);
+    background-position:calc(100% - 14px) 52%,calc(100% - 9px) 52%;background-size:5px 5px;background-repeat:no-repeat}
+  select.sel option{background:#080c22;color:var(--text)}
+  .mini{font:600 11px var(--font);color:var(--text);cursor:pointer;padding:6px 12px;border-radius:8px;
+    border:1px solid var(--border);
+    background:rgba(255,255,255,.06);
+    backdrop-filter:var(--blur-sm);-webkit-backdrop-filter:var(--blur-sm);
+    transition:var(--tr)}
+  .mini:hover{border-color:var(--border-strong);color:var(--accent);
+    background:rgba(255,255,255,.10);box-shadow:0 0 16px rgba(57,255,133,.16)}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:3px;width:108px;border-radius:3px;
+    background:linear-gradient(90deg,var(--accent-blue),var(--accent-cyan));outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+    background:#eafff6;box-shadow:0 0 10px rgba(57,255,133,.8);cursor:pointer}
+  input[type=checkbox]{accent-color:var(--accent);width:14px;height:14px}
+
+  #readout{margin-left:auto;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    display:flex;align-items:center;gap:8px;font:500 11.5px var(--mono);color:var(--text-dim);
+    padding:7px 14px;border-radius:var(--radius-sm);
+    border:1px solid var(--border);
+    background:rgba(255,255,255,.04);
+    backdrop-filter:var(--blur-sm);-webkit-backdrop-filter:var(--blur-sm);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+  #readout b{color:var(--accent);font-weight:500}
+  #readout::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent-cyan);
+    box-shadow:0 0 10px var(--accent-cyan);flex:0 0 auto}
+
+  /* action group + hamburger (hamburger hidden until mobile portrait) */
+  #bar-actions{display:flex;align-items:center;gap:4px}
+  #hamburger{display:none;align-items:center;justify-content:center;margin-left:auto;padding:9px 11px}
+  .ham-ico,.ham-ico::before,.ham-ico::after{display:block;width:18px;height:2px;border-radius:2px;
+    background:currentColor;transition:transform var(--tr),top var(--tr),background var(--tr)}
+  .ham-ico{position:relative}
+  .ham-ico::before,.ham-ico::after{content:"";position:absolute;left:0}
+  .ham-ico::before{top:-6px} .ham-ico::after{top:6px}
+  #bar.nav-open .ham-ico{background:transparent}
+  #bar.nav-open .ham-ico::before{top:0;transform:rotate(45deg)}
+  #bar.nav-open .ham-ico::after{top:0;transform:rotate(-45deg)}
+
+  /* ---------- tabs bar ---------- */
+  #tabs-bar{flex:none;height:44px;display:flex;align-items:center;gap:2px;
+    padding:0 10px;background:rgba(4,6,20,.30);
+    backdrop-filter:var(--blur-sm);-webkit-backdrop-filter:var(--blur-sm);
+    border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:none}
+  #tabs-bar::-webkit-scrollbar{display:none}
+  .tab-btn{appearance:none;background:none;border:0;cursor:pointer;
+    color:var(--text-dim);font:600 12px var(--font);letter-spacing:.03em;
+    padding:7px 14px;border-radius:var(--radius-sm);white-space:nowrap;
+    transition:var(--tr);flex:none}
+  .tab-btn:hover{color:var(--text);background:rgba(255,255,255,.07)}
+  .tab-btn.act{color:var(--accent);background:rgba(57,255,133,.08);
+    text-shadow:0 0 12px rgba(57,255,133,.40)}
+
+  /* ---------- panel grid ---------- */
+  #grid{flex:none;height:calc(100vh - 132px);min-height:320px;display:grid;
+    position:relative;background:rgba(255,255,255,.04);margin:0 12px;
+    border-radius:var(--radius);overflow:hidden;
+    border:1px solid var(--border);box-shadow:var(--lift)}
+  body.tab-overview #grid{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:3px}
+  body.tab-fugu #grid,body.tab-opus #grid,body.tab-gpt #grid,
+  body.tab-gemini #grid,body.tab-reference #grid{
+    grid-template-columns:1fr;grid-template-rows:1fr}
+  body.tab-scorecard #grid{height:0;min-height:0;margin:0;border:0;box-shadow:none;overflow:hidden}
+  body.tab-overview .cell[data-id="reference"],
+  body.tab-fugu .cell:not([data-id="fugu"]),
+  body.tab-opus .cell:not([data-id="opus"]),
+  body.tab-gpt .cell:not([data-id="gpt"]),
+  body.tab-gemini .cell:not([data-id="gemini"]),
+  body.tab-reference .cell:not([data-id="reference"]),
+  body.tab-scorecard .cell{
+    position:absolute;top:0;left:-9999px;width:1px;height:1px;overflow:hidden;box-shadow:none}
+  body.tab-overview .cell iframe{transform:scale(1.9);transform-origin:50% 50%}
+  .focus-overlay{position:absolute;inset:0;z-index:8;cursor:zoom-in;display:none;
+    transition:background var(--tr)}
+  body.tab-overview .focus-overlay{display:block}
+  .focus-overlay:hover{background:rgba(57,255,133,.07)}
+  #scorecard-tab{display:none}
+  body.tab-scorecard #scorecard-tab{display:contents}
+  #score,#glossary,#physics{display:block}
+  .cell{position:relative;background:rgba(3,3,15,.82);overflow:hidden;min-width:0;min-height:0;transition:box-shadow var(--tr)}
+  .cell iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
+  .cell.focus{box-shadow:inset 0 0 0 2px rgba(57,255,133,.55),inset 0 0 70px -10px rgba(57,255,133,.18);z-index:2}
+
+  .chip{position:absolute;top:12px;left:12px;z-index:6;display:flex;align-items:center;gap:9px;
+    padding:8px 14px 8px 12px;border-radius:var(--radius);pointer-events:none;
+    background:rgba(8,10,28,.55);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    border:1px solid var(--border);
+    box-shadow:var(--lift),inset 0 1px 0 rgba(255,255,255,.10)}
+  .chip .nm{font:500 13px var(--head);letter-spacing:.01em}
+  .chip .tag{font:600 8px var(--font);letter-spacing:.16em;text-transform:uppercase;color:var(--text-dim)}
+  .chip .bi{width:16px;height:16px;flex:0 0 auto;opacity:.7}
+  .chip.ref{border-color:var(--border-strong)}
+  .chip.ref .nm{color:var(--accent-cyan)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--warn);flex:0 0 auto;
+    box-shadow:0 0 8px var(--warn);position:relative}
+  .chip.live .dot{background:var(--accent);box-shadow:0 0 10px var(--accent)}
+  .chip.live .dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;
+    border:1.5px solid var(--accent);opacity:.6;animation:ping 1.8s ease-out infinite}
+  .chip.err .dot{background:var(--err);box-shadow:0 0 10px var(--err)}
+  @keyframes ping{0%{transform:scale(.7);opacity:.7}100%{transform:scale(2.2);opacity:0}}
+  @media (prefers-reduced-motion:reduce){.chip.live .dot::after{animation:none}}
+
+  .wait{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:12px;color:var(--text-dim);font-size:12px;z-index:4;pointer-events:none;text-align:center;padding:24px}
+  .wait .ring{width:30px;height:30px;border-radius:50%;border:2px solid rgba(100,140,255,.15);
+    border-top-color:var(--accent);animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){.wait .ring{animation:none}}
+
+  /* ---------- section divider — colliding-wave animation ---------- */
+  .sect-div{flex:none;position:relative;height:38px;margin:14px 12px;border:none;overflow:hidden}
+  .sect-div::before{content:"";position:absolute;left:0;right:0;top:50%;height:1px;
+    background:linear-gradient(90deg,transparent,var(--accent-blue) 30%,var(--accent-cyan) 50%,var(--accent-blue) 70%,transparent);
+    opacity:.20}
+  .sect-div .wv{position:absolute;left:0;right:0;top:50%;height:26px;margin-top:-13px;
+    background-repeat:repeat-x;background-size:90px 26px;background-position:0 center}
+  .sect-div .wv1{opacity:.55;animation:wvR 6.5s linear infinite;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='26'%3E%3Cpath d='M0 13 q22.5 -9 45 0 t45 0' fill='none' stroke='%237b8cff' stroke-width='1.6'/%3E%3C/svg%3E");
+    -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 16%,#000 42%,transparent 51%);
+            mask-image:linear-gradient(90deg,transparent 0,#000 16%,#000 42%,transparent 51%)}
+  .sect-div .wv2{opacity:.45;animation:wvL 5.5s linear infinite;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='26'%3E%3Cpath d='M0 13 q22.5 -9 45 0 t45 0' fill='none' stroke='%232dd4bf' stroke-width='1.6'/%3E%3C/svg%3E");
+    -webkit-mask-image:linear-gradient(90deg,transparent 49%,#000 58%,#000 84%,transparent 100%);
+            mask-image:linear-gradient(90deg,transparent 49%,#000 58%,#000 84%,transparent 100%)}
+  @keyframes wvR{to{background-position-x:90px}}
+  @keyframes wvL{to{background-position-x:-90px}}
+  .sect-div .splash{position:absolute;left:50%;top:50%;width:96px;height:96px;margin:-48px 0 0 -48px;
+    border-radius:50%;pointer-events:none;
+    background:radial-gradient(circle,rgba(140,230,255,.30) 0,rgba(57,255,133,.10) 40%,transparent 68%);
+    animation:splash 2.8s ease-in-out infinite}
+  @keyframes splash{0%,100%{transform:scale(.55);opacity:.2}50%{transform:scale(1);opacity:.6}}
+  @media (prefers-reduced-motion:reduce){.sect-div .wv,.sect-div .splash{animation:none}.sect-div .splash{opacity:.3}}
+
+  /* ---------- themed scrollbar ---------- */
+
+  /* ---------- scorecard ---------- */
+  #score,#glossary,#physics{flex:none;z-index:20;
+    margin:0 12px;border-radius:var(--radius);
+    background:rgba(8,10,30,.60);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    border:1px solid var(--border);
+    box-shadow:var(--lift),inset 0 1px 0 rgba(255,255,255,.08);
+    padding:28px 32px 36px}
+  #score-table-wrap{overflow-x:auto}
+#score .hd,#glossary .hd,#physics .hd{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:11px}
+  #score h3,#glossary h3,#physics h3{margin:0;font:600 30px var(--head);letter-spacing:-.01em;
+    background:linear-gradient(110deg,#eaeefc 0%,#b8c4ff 55%,#7b8cff 100%);
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  #score h3 em,#glossary h3 em,#physics h3 em{font-style:italic;
+    background:linear-gradient(110deg,#39ff85 0%,#2dd4bf 100%);
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  #score .sub,#glossary .sub,#physics .sub{margin:0;font-size:11px;color:var(--text-dim)}
+  #score table{border-collapse:collapse;width:100%;font:500 11.5px var(--mono);font-variant-numeric:tabular-nums}
+  #score th{font:600 8px var(--font);letter-spacing:.13em;text-transform:uppercase;color:var(--text-dim);
+    padding:0 9px 7px;text-align:right;border-bottom:1px solid var(--border)}
+  #score th:first-child{text-align:left}
+  #score td{padding:7px 9px;text-align:right;border-bottom:1px solid rgba(100,140,255,.06)}
+  #score td:first-child{text-align:left;font-family:var(--font);font-weight:600}
+  #score tr:last-child td{border-bottom:0}
+  #score td.best{color:var(--accent);font-weight:600}
+  #score tr.leader{background:linear-gradient(90deg,rgba(57,255,133,.10),transparent)}
+  #score tr.leader td:first-child::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+    background:var(--accent);box-shadow:0 0 8px var(--accent);margin-right:7px;vertical-align:middle}
+  #score tr.refrow td{color:var(--accent-cyan)}
+  #score tr.refrow td:first-child::before{content:"◆";color:var(--accent-cyan);margin-right:6px;font-size:9px;vertical-align:middle}
+  #score .note{margin-top:9px;color:var(--text-faint);font-size:10px;line-height:1.5;white-space:normal}
+  .pill-off{font:600 8px var(--font);letter-spacing:.06em;color:var(--warn);
+    border:1px solid rgba(255,140,66,.4);border-radius:6px;padding:1px 5px;margin-left:6px}
+
+  /* ---------- diff modal ---------- */
+  #diff{position:absolute;inset:0;z-index:50;display:none;align-items:center;justify-content:center;
+    background:rgba(3,3,14,.62);backdrop-filter:blur(12px) saturate(160%);-webkit-backdrop-filter:blur(12px) saturate(160%)}
+  #diff.show{display:flex}
+  #diffbox{position:relative;max-width:92vw;padding:24px 26px 22px;border-radius:var(--radius);
+    background:rgba(8,10,30,.70);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    border:1px solid var(--border);
+    box-shadow:0 40px 100px -24px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10)}
+  #diffbox h3{margin:0;font:500 19px var(--head);color:var(--text)}
+  #diffbox h3 em{font-style:italic;color:var(--accent)}
+  #diffbox .sub{margin:1px 0 12px;font-size:12px;color:var(--text-dim)}
+  #diffbox .ctl{display:flex;gap:14px;align-items:center;margin-bottom:12px;font-size:11.5px}
+  #diffbox .ctl label{color:var(--text-dim);display:flex;gap:6px;align-items:center}
+  #diffinfo{font-family:var(--mono)}
+  #diffcanvas{display:block;border-radius:var(--radius-sm);border:1px solid var(--border)}
+  #diffclose{position:absolute;top:16px;right:18px}
+
+  /* ---------- score bar charts — standalone panel ---------- */
+  #bars-panel{flex:none;z-index:20;margin:0 12px;border-radius:var(--radius);
+    background:rgba(8,10,30,.60);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    border:1px solid var(--border);
+    box-shadow:var(--lift),inset 0 1px 0 rgba(255,255,255,.08);
+    padding:22px 28px 24px}
+  #bars-panel .hd{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+  #bars-panel h3{margin:0;font:600 24px var(--head);letter-spacing:-.01em;
+    background:linear-gradient(110deg,#eaeefc 0%,#b8c4ff 55%,#7b8cff 100%);
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  #bars-panel h3 em{font-style:italic;
+    background:linear-gradient(110deg,#39ff85 0%,#2dd4bf 100%);
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  #bars-panel .sub{margin:0;font-size:11px;color:var(--text-dim)}
+  #score-bars{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .bc-g{padding:14px 14px 10px;border-radius:var(--radius-sm);
+    border:1px solid var(--border);
+    background:rgba(255,255,255,.04);
+    backdrop-filter:var(--blur-sm);-webkit-backdrop-filter:var(--blur-sm);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}
+  .bc-hd{font:600 8px var(--font);letter-spacing:.15em;text-transform:uppercase;
+    color:var(--text-dim);margin-bottom:10px;text-align:center}
+  .bc-chart{display:flex;align-items:flex-end;height:72px;gap:8px}
+  .bc-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:3px}
+  .bc-val-v{font:500 9px var(--mono);white-space:nowrap;line-height:1}
+  .bc-bar-v{width:100%;border-radius:2px 2px 0 0;min-height:2px;
+    transition:height .45s cubic-bezier(.4,0,.2,1)}
+  .bc-xlbls{display:flex;gap:8px;margin-top:6px}
+  .bc-xl{flex:1;font:500 9px var(--font);color:var(--text-faint);text-align:center;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* ---------- metric glossary cards ---------- */
+  .gloss-legend{margin:2px 0 0;font-size:11px;color:var(--text-dim);line-height:1.7}
+  .gloss-legend math{color:var(--text);font-size:13px;vertical-align:-.1em}
+  #metric-cards,#physics-cards{margin-top:16px;display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(296px,1fr));gap:14px}
+  .mc{position:relative;padding:16px 16px 15px;border-radius:var(--radius-sm);
+    border:1px solid var(--border);
+    background:rgba(255,255,255,.04);
+    backdrop-filter:var(--blur-sm);-webkit-backdrop-filter:var(--blur-sm);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.07);
+    display:flex;flex-direction:column;gap:12px;overflow:hidden;transition:var(--tr)}
+  .mc:hover{border-color:var(--border-strong);transform:translateY(-2px);
+    box-shadow:var(--lift-sm),inset 0 1px 0 rgba(255,255,255,.10)}
+  .mc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;
+    background:var(--mc-tone,var(--accent-cyan));opacity:.75}
+  .mc.g{--mc-tone:var(--accent)}  .mc.b{--mc-tone:var(--accent-blue)}
+  .mc.c{--mc-tone:var(--accent-cyan)}  .mc.o{--mc-tone:var(--accent-2)}
+  .mc.p{--mc-tone:var(--marker)}  .mc.d{--mc-tone:var(--text-dim)}
+  .mc-hd{display:flex;align-items:center;gap:11px}
+  .mc-ico{width:34px;height:34px;flex:0 0 auto;border-radius:9px;
+    display:flex;align-items:center;justify-content:center;color:var(--mc-tone,var(--accent-cyan));
+    background:color-mix(in srgb,var(--mc-tone,var(--accent-cyan)) 13%,transparent);
+    border:1px solid color-mix(in srgb,var(--mc-tone,var(--accent-cyan)) 32%,transparent);
+    box-shadow:0 0 18px -6px var(--mc-tone,var(--accent-cyan))}
+  .mc-ico svg{width:18px;height:18px}
+  .mc-t{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .mc-t b{font:600 13.5px var(--font);letter-spacing:.01em;color:var(--text)}
+  .mc-t span{font:600 8px var(--font);letter-spacing:.13em;text-transform:uppercase;color:var(--text-dim)}
+  .mc-badge{margin-left:auto;align-self:flex-start;font:600 7.5px var(--font);
+    letter-spacing:.12em;text-transform:uppercase;color:var(--mc-tone);
+    border:1px solid color-mix(in srgb,var(--mc-tone) 42%,transparent);border-radius:6px;padding:2px 6px}
+  .mc-eq{padding:11px 12px;border-radius:8px;text-align:center;overflow-x:auto;
+    background:rgba(3,5,18,.42);border:1px solid var(--border)}
+  .mc-eq math{color:var(--text);font-size:16px}
+  .mc-desc{margin:0;font:400 11.5px/1.55 var(--font);color:var(--text-dim);
+    text-align:justify;text-justify:inter-word;hyphens:auto}
+
+  /* ---------- footer ---------- */
+  #foot{flex:none;z-index:30;display:flex;align-items:center;justify-content:center;gap:7px;
+    height:32px;font-size:11px;letter-spacing:.02em;color:var(--text-faint);
+    background:rgba(4,5,18,.72);
+    backdrop-filter:var(--blur-sm);-webkit-backdrop-filter:var(--blur-sm);
+    border-top:1px solid var(--border);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+  #foot a{color:var(--text-dim);text-decoration:none;font-weight:600;transition:var(--tr)}
+  #foot a:hover{color:var(--accent);text-shadow:0 0 10px rgba(57,255,133,.45)}
+
+  /* ============================================================
+     MOBILE PORTRAIT — panels stack 4×1, score bar-charts stack 9×1,
+     toolbar controls collapse into a hamburger drawer
+     ============================================================ */
+  @media (max-width:680px){
+    /* compact header — only brand + hamburger remain inline */
+    #bar{padding:0 14px}
+    .brand{margin-right:6px}
+    .brand b{font-size:16px}
+    #readout{display:none}                       /* hover readout is meaningless on touch */
+    #hamburger{display:inline-flex}
+
+    /* controls collapse into a hamburger-triggered drawer */
+    #bar-actions{position:absolute;top:calc(100% + 8px);left:8px;right:8px;z-index:65;
+      flex-direction:column;align-items:stretch;gap:4px;padding:12px;
+      background:rgba(8,10,30,.86);
+      backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+      border:1px solid var(--border);border-radius:var(--radius);
+      box-shadow:var(--lift),inset 0 1px 0 rgba(255,255,255,.08);
+      max-height:calc(100vh - 110px);overflow:auto;display:none}
+    #bar.nav-open #bar-actions{display:flex}
+    #bar-actions .vsep{display:none}
+    #bar-actions .lnk,#bar-actions details.menu>summary{width:100%;justify-content:flex-start;
+      font-size:13px;padding:11px 12px}
+    /* Fan / View expand inline (accordion) inside the drawer */
+    #bar-actions details.menu{width:100%}
+    #bar-actions .pop{position:static;margin-top:4px;min-width:0;width:100%;
+      box-shadow:none;background:rgba(255,255,255,.04)}
+
+    /* grid fills viewport height */
+    #grid{height:calc(100svh - 132px)}
+    #score-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    #score th,#score td{white-space:nowrap}
+
+    /* scorecard — tighter chrome, nine bar-charts stacked 9×1 */
+    .sect-div{margin:10px 12px}
+    #score,#glossary,#physics{padding:20px 14px 24px;margin:0}
+    #score h3,#glossary h3,#physics h3{font-size:19px}
+    #bars-panel{padding:18px 14px 20px;margin:0 8px}
+    #bars-panel h3{font-size:19px}
+    #score-bars{grid-template-columns:1fr}
+    #metric-cards,#physics-cards{grid-template-columns:1fr}
+
+    /* diff modal fits the viewport */
+    #diffbox{padding:18px 16px 16px;max-width:94vw}
+    #diffcanvas{width:100%;max-width:100%;height:auto}
+  }
+</style>
+</head>
+<body class="tab-overview">
+<div id="bar">
+  <svg class="logo" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+    <defs>
+      <radialGradient id="lg-scope" cx="0.5" cy="0.5" r="0.5">
+        <stop offset="0" stop-color="#0c2418"/><stop offset="1" stop-color="#05130c"/>
+      </radialGradient>
+      <linearGradient id="lg-sweep" x1="32" y1="32" x2="60" y2="24" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#39ff85" stop-opacity="0.55"/><stop offset="1" stop-color="#39ff85" stop-opacity="0"/>
+      </linearGradient>
+      <filter id="lg-glow" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur stdDeviation="1.1" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <clipPath id="lg-disc"><circle cx="32" cy="32" r="29"/></clipPath>
+    </defs>
+    <circle cx="32" cy="32" r="29" fill="url(#lg-scope)" stroke="#39ff85" stroke-opacity="0.5" stroke-width="1.6"/>
+    <g clip-path="url(#lg-disc)" stroke="#39ff85" fill="none">
+      <g stroke-opacity="0.30" stroke-width="0.9"><circle cx="32" cy="32" r="8"/><circle cx="32" cy="32" r="15"/><circle cx="32" cy="32" r="22"/></g>
+      <g stroke-opacity="0.20" stroke-width="0.9"><line x1="3" y1="32" x2="61" y2="32"/><line x1="32" y1="3" x2="32" y2="61"/></g>
+      <g>
+        <path d="M32 32 L32 3 A29 29 0 0 1 60 24.5 Z" fill="url(#lg-sweep)"/>
+        <line x1="32" y1="32" x2="32" y2="3" stroke="#9dffc4" stroke-width="1.6" filter="url(#lg-glow)"/>
+        <animateTransform attributeName="transform" type="rotate" from="0 32 32" to="360 32 32" dur="3.6s" repeatCount="indefinite"/>
+      </g>
+    </g>
+    <circle cx="42" cy="20" r="2.2" fill="#9dffc4" filter="url(#lg-glow)">
+      <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.18;0.5;1" dur="3.6s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="32" cy="32" r="2" fill="#39ff85"/>
+  </svg>
+  <div class="brand"><b>UWA <em>Ray</em> Bench</b></div>
+  <button class="lnk" id="hamburger" aria-label="Toggle menu" aria-controls="bar-actions" aria-expanded="false"><span class="ham-ico"></span></button>
+  <div id="bar-actions">
+    <button class="lnk" id="play">▶ Play all</button>
+    <button class="lnk" id="reset">⟲ Reset</button>
+    <button class="lnk" id="camreset">⌖ Camera</button>
+    <span class="vsep"></span>
+    <details class="menu" name="navmenu">
+      <summary>Fan</summary>
+      <div class="pop">
+        <div class="r"><span>Elevation × Azimuth beams</span></div>
+        <div class="r"><select class="sel" id="elevsel"></select><span>×</span><select class="sel" id="azimsel"></select></div>
+        <button class="mini" id="canon">Reset to canonical 41×31</button>
+      </div>
+    </details>
+    <details class="menu" name="navmenu">
+      <summary>View</summary>
+      <div class="pop">
+        <label class="r"><span>TL volume</span><input type="checkbox" id="volchk" checked></label>
+        <label class="r"><span>Opacity</span><input type="range" id="opac" min="0" max="1" step="0.02" value="0.5"></label>
+      </div>
+    </details>
+    <span class="vsep"></span>
+    <button class="lnk" id="diffbtn">⊞ Diff overlay</button>
+    <button class="lnk" id="scorebtn">★ Scorecard</button>
+    <button class="lnk" id="physicsbtn">∂ Physics</button>
+  </div>
+  <span id="readout">Hover a panel for c(z) · D(x,y)</span>
+</div>
+
+<nav id="tabs-bar">
+  <button class="tab-btn act" data-tab="overview">Overview</button>
+  <button class="tab-btn" data-tab="fugu">Fugu</button>
+  <button class="tab-btn" data-tab="opus">Opus</button>
+  <button class="tab-btn" data-tab="gpt">GPT</button>
+  <button class="tab-btn" data-tab="gemini">Gemini</button>
+  <button class="tab-btn" data-tab="reference">Reference</button>
+  <button class="tab-btn" data-tab="scorecard">Scorecard</button>
+</nav>
+
+<div id="grid">
+  <div class="cell" data-id="fugu">
+    <div class="focus-overlay" data-focus="fugu"></div>
+    <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"/><path d="M18 12v.5"/><path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"/><path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"/><path d="M10.46 7.26C10.2 5.88 9.17 4.24 8 3h5.8a2 2 0 0 1 1.98 1.67l.23 1.4"/><path d="m16.01 17.93-.23 1.4A2 2 0 0 1 13.8 21H9.5a5.96 5.96 0 0 0 1.49-3.98"/></svg><span class="nm">Sakana Fugu</span><span class="tag">ultra · model</span></div>
+    <iframe data-id="fugu" src="../models/fugu/ray_view.html" title="Sakana Fugu"></iframe>
+    <div class="wait"><div class="ring"></div>Awaiting Fugu panel…</div></div>
+  <div class="cell" data-id="opus">
+    <div class="focus-overlay" data-focus="opus"></div>
+    <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(350 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(20 12 12)"/><rect x="10.5" y="1" width="3.0" height="6.5" rx="0.5" transform="rotate(50 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(75 12 12)"/><rect x="11.3" y="1" width="1.4" height="6.5" rx="0.5" transform="rotate(100 12 12)"/><rect x="10.5" y="1" width="3.0" height="6.5" rx="0.5" transform="rotate(128 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(152 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(175 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(200 12 12)"/><rect x="11.3" y="1" width="1.4" height="6.5" rx="0.5" transform="rotate(225 12 12)"/><rect x="10.5" y="1" width="3.0" height="6.5" rx="0.5" transform="rotate(255 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(282 12 12)"/><rect x="10.5" y="1" width="3.0" height="6.5" rx="0.5" transform="rotate(316 12 12)"/></svg><span class="nm">Opus 4.8</span><span class="tag">max · model</span></div>
+    <iframe data-id="opus" src="../models/opus/ray_view.html" title="Opus 4.8"></iframe>
+    <div class="wait"><div class="ring"></div>Awaiting Opus panel…</div></div>
+  <div class="cell" data-id="gpt">
+    <div class="focus-overlay" data-focus="gpt"></div>
+    <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg><span class="nm">GPT 5.5</span><span class="tag">extra high · model</span></div>
+    <iframe data-id="gpt" src="../models/gpt/ray_view.html" title="GPT 5.5"></iframe>
+    <div class="wait"><div class="ring"></div>Awaiting GPT panel…</div></div>
+  <div class="cell" data-id="gemini">
+    <div class="focus-overlay" data-focus="gemini"></div>
+    <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C12 2 13.5 8.75 17.5 12C13.5 15.25 12 22 12 22C12 22 10.5 15.25 6.5 12C10.5 8.75 12 2 12 2Z"/><path d="M2 12C2 12 8.75 10.5 12 6.5C15.25 10.5 22 12 22 12C22 12 15.25 13.5 12 17.5C8.75 13.5 2 12 2 12Z"/></svg><span class="nm">Gemini 3.1 Pro</span><span class="tag">high · model</span></div>
+    <iframe data-id="gemini" src="../models/gemini/ray_view.html" title="Gemini 3.1 Pro"></iframe>
+    <div class="wait"><div class="ring"></div>Awaiting Gemini panel…</div></div>
+  <div class="cell" data-id="reference">
+    <div class="chip ref"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="1.5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M8.5 15.5a5 5 0 0 1 0-7"/><path d="M18.5 5.5a10 10 0 0 1 0 13"/><path d="M5.5 18.5a10 10 0 0 1 0-13"/></svg><span class="nm">BELLHOP3D</span><span class="tag">reference · ground truth</span></div>
+    <iframe data-id="reference" src="../reference/ray_view_reference.html" title="BELLHOP3D reference"></iframe>
+    <div class="wait"><div class="ring"></div>Loading reference…</div></div>
+</div>
+
+<div id="scorecard-tab">
+<div id="score">
+  <div class="hd"><h3>Score<em>card</em></h3></div>
+  <div id="score-table-wrap"><table id="scoretbl"></table></div>
+  <p class="note">Raw, unweighted TL RMSE + TL(R) error. The tiered scoring rubric is intentionally
+    deferred — calibrated against real numbers later. <b style="color:var(--text-dim)">core RMSE</b>
+    excludes cells in shadow (TL ≥ 120 dB) in either field; the leader is the lowest core RMSE.</p>
+</div>
+
+<div id="bars-panel">
+  <div class="hd"><h3>Visual <em>comparison</em></h3>
+    <p class="sub">Per-metric bar comparison across all models vs BELLHOP3D reference</p></div>
+  <div id="score-bars"></div>
+</div>
+
+<div class="sect-div" aria-hidden="true"><div class="wv wv1"></div><div class="wv wv2"></div><div class="splash"></div></div>
+
+<div id="glossary">
+  <div class="hd"><h3>Metric <em>glossary</em></h3>
+    <p class="sub">How each scorecard column is defined and scored vs BELLHOP3D</p></div>
+  <p class="gloss-legend">
+    <math xmlns="http://www.w3.org/1998/Math/MathML"><msub><mover><mi>T</mi><mo>^</mo></mover><mi>i</mi></msub></math>
+    = model TL ·
+    <math xmlns="http://www.w3.org/1998/Math/MathML"><msub><mi>T</mi><mi>i</mi></msub></math>
+    = BELLHOP3D TL, per grid cell
+    <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>i</mi></math>
+    (<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>N</mi><mo>=</mo><mn>101</mn><mo>·</mo><mn>49</mn><mo>·</mo><mn>31</mn></math> cells) ·
+    <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>R</mi></math> = receiver · shadow cutoff 120 dB.
+  </p>
+
+  <div id="metric-cards">
+
+    <div class="mc g">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 4H7l6 8-6 8h10"/></svg></span>
+        <span class="mc-t"><b>TL RMSE</b><span>full-field error · dB</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <msqrt><mrow><mfrac><mn>1</mn><mi>N</mi></mfrac>
+        <munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>N</mi></munderover>
+        <msup><mrow><mo>(</mo><msub><mover><mi>T</mi><mo>^</mo></mover><mi>i</mi></msub><mo>−</mo><msub><mi>T</mi><mi>i</mi></msub><mo>)</mo></mrow><mn>2</mn></msup></mrow></msqrt>
+      </math></div>
+      <p class="mc-desc">Root-mean-square gap between the model's transmission-loss field and BELLHOP3D over every cell of the 101×49×31 grid, shadow zones included. Lower means the whole field tracks ground truth.</p>
+    </div>
+
+    <div class="mc g">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span>
+        <span class="mc-t"><b>Core RMSE</b><span>insonified error · dB</span></span>
+        <span class="mc-badge">leader</span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <msqrt><mrow><mfrac><mn>1</mn><mrow><mo>|</mo><mi>C</mi><mo>|</mo></mrow></mfrac>
+        <munder><mo>∑</mo><mrow><mi>i</mi><mo>∈</mo><mi>C</mi></mrow></munder>
+        <msup><mrow><mo>(</mo><msub><mover><mi>T</mi><mo>^</mo></mover><mi>i</mi></msub><mo>−</mo><msub><mi>T</mi><mi>i</mi></msub><mo>)</mo></mrow><mn>2</mn></msup></mrow></msqrt>
+      </math></div>
+      <p class="mc-desc">The same RMSE but only over cells insonified in both fields — <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>C</mi><mo>=</mo><mo>{</mo><mi>i</mi><mo>:</mo><msub><mover><mi>T</mi><mo>^</mo></mover><mi>i</mi></msub><mo>,</mo><msub><mi>T</mi><mi>i</mi></msub><mo>&lt;</mo><mn>120</mn><mo>}</mo></math> dB — so empty shadow zones can't flatter the score. This is the leaderboard metric; lowest wins.</p>
+    </div>
+
+    <div class="mc b">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg></span>
+        <span class="mc-t"><b>TL(R)</b><span>receiver loss · dB</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mrow><mi>TL</mi><mo>(</mo><mi>R</mi><mo>)</mo><mo>=</mo><mo>−</mo><mn>20</mn>
+        <msub><mi>log</mi><mn>10</mn></msub>
+        <mfrac><mrow><mo>|</mo><mi>p</mi><mo>(</mo><mi>R</mi><mo>)</mo><mo>|</mo></mrow><msub><mi>p</mi><mtext>ref</mtext></msub></mfrac></mrow>
+      </math></div>
+      <p class="mc-desc">The transmission loss in dB at the single receiver point <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>R</mi></math> each panel reports. It anchors agreement at the one scored operating point (canonical 41×31).</p>
+    </div>
+
+    <div class="mc b">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"/><path d="m8 7 4-4 4 4"/><path d="m8 17 4 4 4-4"/></svg></span>
+        <span class="mc-t"><b>TL(R) err</b><span>receiver error · dB</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mrow><mi>Δ</mi><mi>TL</mi><mo>(</mo><mi>R</mi><mo>)</mo><mo>=</mo><mo>|</mo>
+        <msub><mi>TL</mi><mtext>mdl</mtext></msub><mo>(</mo><mi>R</mi><mo>)</mo><mo>−</mo>
+        <msub><mi>TL</mi><mtext>ref</mtext></msub><mo>(</mo><mi>R</mi><mo>)</mo><mo>|</mo></mrow>
+      </math></div>
+      <p class="mc-desc">Absolute deviation of the model's receiver TL from BELLHOP3D's. Isolates accuracy at the target point, independent of the rest of the field.</p>
+    </div>
+
+    <div class="mc c">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></svg></span>
+        <span class="mc-t"><b>Recip</b><span>self-consistency · dB</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mrow><msub><mi>ε</mi><mtext>recip</mtext></msub><mo>=</mo><mo>|</mo>
+        <mi>TL</mi><mo>(</mo><mi>S</mi><mo>→</mo><mi>R</mi><mo>)</mo><mo>−</mo>
+        <mi>TL</mi><mo>(</mo><mi>R</mi><mo>→</mo><mi>S</mi><mo>)</mo><mo>|</mo></mrow>
+      </math></div>
+      <p class="mc-desc">In a reciprocal medium, source→receiver and receiver→source loss must match. This residual is a physics self-consistency check that should sit near 0 dB.</p>
+    </div>
+
+    <div class="mc c">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4 9 9"/><path d="M20 4l-5 5"/><path d="M4 20l5-5"/><path d="M20 20l-5-5"/><circle cx="12" cy="12" r="2"/></svg></span>
+        <span class="mc-t"><b>Conv ΔTL(R)</b><span>convergence · dB</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mrow><msub><mi>Δ</mi><mtext>conv</mtext></msub><mo>=</mo><mo>|</mo>
+        <msub><mi>TL</mi><mrow><mn>2</mn><mi>n</mi></mrow></msub><mo>(</mo><mi>R</mi><mo>)</mo><mo>−</mo>
+        <msub><mi>TL</mi><mi>n</mi></msub><mo>(</mo><mi>R</mi><mo>)</mo><mo>|</mo></mrow>
+      </math></div>
+      <p class="mc-desc">How much the receiver TL shifts when the ray fan is refined (count <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>n</mi><mo>→</mo><mn>2</mn><mi>n</mi></math>). A small value means the solution has converged, not an artifact of under-sampling.</p>
+    </div>
+
+    <div class="mc o">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="1.5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M8.5 15.5a5 5 0 0 1 0-7"/><path d="M18.5 5.5a10 10 0 0 1 0 13"/><path d="M5.5 18.5a10 10 0 0 1 0-13"/></svg></span>
+        <span class="mc-t"><b>Insonif%</b><span>coverage · %</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mrow><mfrac>
+          <mrow><mo>|</mo><mo>{</mo><mi>i</mi><mo>:</mo><msub><mi>TL</mi><mi>i</mi></msub><mo>&lt;</mo><mn>120</mn><mo>}</mo><mo>|</mo></mrow>
+          <mi>N</mi></mfrac><mo>×</mo><mn>100</mn></mrow>
+      </math></div>
+      <p class="mc-desc">Share of grid cells the model marks as insonified (TL below the 120 dB shadow cutoff) — how much of the volume the field reaches versus shadow.</p>
+    </div>
+
+    <div class="mc p">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 8 4 4-4 4"/><path d="M2 12h20"/><path d="m6 8-4 4 4 4"/></svg></span>
+        <span class="mc-t"><b>|Δy| 3D</b><span>out-of-plane · km</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mrow><mo>|</mo><mi>Δ</mi><mi>y</mi><mo>|</mo><mo>=</mo>
+        <munder><mi>max</mi><mtext>ray</mtext></munder>
+        <mo>|</mo><msub><mi>y</mi><mtext>ray</mtext></msub><mo>−</mo><msub><mi>y</mi><mn>0</mn></msub><mo>|</mo></mrow>
+      </math></div>
+      <p class="mc-desc">Peak lateral excursion a ray makes out of its launch vertical plane — a genuinely 3D effect from horizontal refraction and bathymetry. A bonus/tiebreaker axis, not core score.</p>
+    </div>
+
+    <div class="mc d">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.34 19a10 10 0 1 1 17.32 0"/><path d="m12 12 4-3"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span>
+        <span class="mc-t"><b>FPS</b><span>render rate · fps</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mrow><mi>FPS</mi><mo>=</mo><mfrac><msub><mi>N</mi><mtext>frames</mtext></msub><mrow><mi>Δ</mi><mi>t</mi></mrow></mfrac></mrow>
+      </math></div>
+      <p class="mc-desc">The panel's live render throughput — not physics, but a read on whether the dense ~500k-segment ray fan holds an interactive frame rate.</p>
+    </div>
+
+  </div>
+</div>
+
+<div id="physics">
+  <div class="hd"><h3>BELLHOP3D <em>Physics</em></h3>
+    <p class="sub">Governing equations for 3D underwater acoustic ray propagation · scenario parameters</p></div>
+  <div id="physics-cards">
+
+    <div class="mc g">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12 q3-5 5 0 t5 0 t5 0 t5 0"/></svg></span>
+        <span class="mc-t"><b>Eikonal Equation</b><span>wave-front · ray basis</span></span>
+        <span class="mc-badge">foundation</span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <msup><mrow><mo stretchy="false">|</mo><mo>∇</mo><mi>τ</mi><mo stretchy="false">|</mo></mrow><mn>2</mn></msup>
+        <mo>=</mo>
+        <mfrac><mn>1</mn><mrow><msup><mi>c</mi><mn>2</mn></msup><mo stretchy="false">(</mo><mi mathvariant="bold">x</mi><mo stretchy="false">)</mo></mrow></mfrac>
+      </math></div>
+      <p class="mc-desc">Foundation of ray acoustics: τ(x) is the travel-time field. Its gradient p = ∇τ is the slowness vector (|p| = 1/c), perpendicular to wavefronts and tangent to rays. Solving the eikonal fully determines all ray paths.</p>
+    </div>
+
+    <div class="mc g">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>
+        <span class="mc-t"><b>Ray Equations</b><span>Hamiltonian · arc length s</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mtable columnalign="right center left" rowspacing="0.7ex">
+          <mtr>
+            <mtd><mfrac><mrow><mi>d</mi><mi mathvariant="bold">x</mi></mrow><mrow><mi>d</mi><mi>s</mi></mrow></mfrac></mtd>
+            <mtd><mo>=</mo></mtd>
+            <mtd><mi>c</mi><mo stretchy="false">(</mo><mi mathvariant="bold">x</mi><mo stretchy="false">)</mo><mo>·</mo><mi mathvariant="bold">p</mi></mtd>
+          </mtr>
+          <mtr>
+            <mtd><mfrac><mrow><mi>d</mi><mi mathvariant="bold">p</mi></mrow><mrow><mi>d</mi><mi>s</mi></mrow></mfrac></mtd>
+            <mtd><mo>=</mo></mtd>
+            <mtd><mo>−</mo><mo>∇</mo><mrow><mo stretchy="false">(</mo><mfrac><mn>1</mn><mi>c</mi></mfrac><mo stretchy="false">)</mo></mrow></mtd>
+          </mtr>
+        </mtable>
+      </math></div>
+      <p class="mc-desc">Hamilton's equations in 3D. x(s) traces the ray position; p(s) = ∇τ the slowness vector (|p| = 1/c). Integrated forward along arc length s from the source with initial azimuth θ<sub>az</sub> and elevation θ<sub>el</sub> launch angles.</p>
+    </div>
+
+    <div class="mc b">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="19" x2="21" y2="19" stroke-dasharray="3 3"/><path d="M3 19 L12 7"/><path d="M12 7 L21 19"/></svg></span>
+        <span class="mc-t"><b>Snell's Law</b><span>interface BC · refraction</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mfrac><mrow><mi>sin</mi><mo>⁡</mo><msub><mi>θ</mi><mn>1</mn></msub></mrow><msub><mi>c</mi><mn>1</mn></msub></mfrac>
+        <mo>=</mo>
+        <mfrac><mrow><mi>sin</mi><mo>⁡</mo><msub><mi>θ</mi><mn>2</mn></msub></mrow><msub><mi>c</mi><mn>2</mn></msub></mfrac>
+        <mo>=</mo>
+        <mi>const</mi>
+      </math></div>
+      <p class="mc-desc">The tangential component of slowness p is conserved at every interface. In a continuously stratified medium this bends rays toward lower-c regions (Fermat's principle), generating the deep SOFAR channel. In 3D it also causes horizontal (azimuthal) deflection over sloped bathymetry.</p>
+    </div>
+
+    <div class="mc b">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 L6 21"/><path d="M12 3 L18 21"/><line x1="6" y1="21" x2="18" y2="21"/></svg></span>
+        <span class="mc-t"><b>Geometric Spreading</b><span>amplitude · Jacobian</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mi>A</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo>
+        <mo>=</mo>
+        <msub><mi>A</mi><mn>0</mn></msub>
+        <msqrt>
+          <mfrac>
+            <mrow><msub><mi>c</mi><mn>0</mn></msub><msub><mi>J</mi><mn>0</mn></msub></mrow>
+            <mrow><mi>c</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>·</mo><mi>J</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow>
+          </mfrac>
+        </msqrt>
+      </math></div>
+      <p class="mc-desc">Pressure amplitude along the ray via energy conservation in the ray tube. J(s) = |∂(x,y)/∂(q₁,q₂)| is the Jacobian of the ray mapping from launch angles q to spatial position. J → 0 at caustics where amplitude diverges.</p>
+    </div>
+
+    <div class="mc c">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1.5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M8.5 15.5a5 5 0 0 1 0-7"/></svg></span>
+        <span class="mc-t"><b>Pressure Field</b><span>WKBJ ray solution</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mi>p</mi><mo stretchy="false">(</mo><mi mathvariant="bold">x</mi><mo>,</mo><mi>ω</mi><mo stretchy="false">)</mo>
+        <mo>=</mo>
+        <munder><mo>∑</mo><mi>k</mi></munder>
+        <msub><mi>A</mi><mi>k</mi></msub><mo stretchy="false">(</mo><mi mathvariant="bold">x</mi><mo stretchy="false">)</mo>
+        <mo>·</mo>
+        <msup><mi mathvariant="normal">e</mi><mrow><mi>i</mi><mi>ω</mi><msub><mi>τ</mi><mi>k</mi></msub><mo stretchy="false">(</mo><mi mathvariant="bold">x</mi><mo stretchy="false">)</mo></mrow></msup>
+      </math></div>
+      <p class="mc-desc">WKBJ approximation to the Helmholtz equation. Each ray arrival k contributes an amplitude A_k and phase ωτ_k; arrivals are summed coherently. BELLHOP's Gaussian-beam variant replaces the Dirac-delta spreading with a finite-width Gaussian to avoid caustic singularities.</p>
+    </div>
+
+    <div class="mc o">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 17 7 7 11 13 15 8 21 17"/></svg></span>
+        <span class="mc-t"><b>Sound Speed Profile</b><span>c(z) · m s⁻¹ · scenario</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mi>c</mi><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo><mo>=</mo>
+        <mo>{</mo>
+        <mtable columnalign="left left" rowspacing="0.5ex">
+          <mtr>
+            <mtd><mn>1520</mn><mo>−</mo><mn>0.10</mn><mo>·</mo><mi>z</mi></mtd>
+            <mtd><mi>z</mi><mo>≤</mo><mn>200</mn><mtext> m</mtext></mtd>
+          </mtr>
+          <mtr>
+            <mtd><mn>1500</mn><mo>+</mo><mn>0.018</mn><mo stretchy="false">(</mo><mi>z</mi><mo>−</mo><mn>200</mn><mo stretchy="false">)</mo></mtd>
+            <mtd><mi>z</mi><mo>&gt;</mo><mn>200</mn><mtext> m</mtext></mtd>
+          </mtr>
+        </mtable>
+      </math></div>
+      <p class="mc-desc">Bi-linear profile: −10 m s⁻¹ km⁻¹ negative gradient in the mixed layer (0–200 m) producing a near-surface shadow zone; then +18 m s⁻¹ km⁻¹ positive gradient below, forming a deep SOFAR (Sound Fixing and Ranging) channel axis.</p>
+    </div>
+
+    <div class="mc p">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 20 Q7 6 10 14 Q13 20 17 9 L20 20 Z" fill="none"/></svg></span>
+        <span class="mc-t"><b>Bathymetry</b><span>D(x,y) · m · scenario</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mtable columnalign="left" rowspacing="0.4ex">
+          <mtr><mtd>
+            <mi>D</mi><mo>=</mo><mn>2500</mn>
+            <mo>−</mo>
+            <munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>1</mn></mrow><mn>2</mn></munderover>
+            <msub><mi>H</mi><mi>k</mi></msub>
+            <mo>exp</mo><mo stretchy="false">(</mo><mo>−</mo><msubsup><mi>r</mi><mi>k</mi><mn>2</mn></msubsup><mo stretchy="false">)</mo>
+          </mtd></mtr>
+          <mtr><mtd>
+            <msubsup><mi>r</mi><mi>k</mi><mn>2</mn></msubsup>
+            <mo>=</mo>
+            <msup><mrow><mo stretchy="false">(</mo><mfrac><mrow><mi>x</mi><mo>−</mo><msub><mi>x</mi><mi>k</mi></msub></mrow><msub><mi>a</mi><mi>k</mi></msub></mfrac><mo stretchy="false">)</mo></mrow><mn>2</mn></msup>
+            <mo>+</mo>
+            <msup><mrow><mo stretchy="false">(</mo><mfrac><mrow><mi>y</mi><mo>−</mo><msub><mi>y</mi><mi>k</mi></msub></mrow><msub><mi>b</mi><mi>k</mi></msub></mfrac><mo stretchy="false">)</mo></mrow><mn>2</mn></msup>
+          </mtd></mtr>
+        </mtable>
+      </math></div>
+      <p class="mc-desc">Two Gaussian seamounts on a 2500 m flat basin. k=1: H=1500 m, (x₁,y₁)=(18,12) km, (a,b)=(2.5,3.0) km. k=2: H=1900 m, (x₂,y₂)=(34,9) km, (a,b)=(2.0,2.5) km. Sloped flanks generate horizontal refraction — the primary 3D out-of-plane deflection effect in this scenario.</p>
+    </div>
+
+  </div>
+</div>
+</div>
+
+<div id="diff">
+  <div id="diffbox">
+    <h3>Diff <em>overlay</em></h3>
+    <p class="sub">TL(model) − TL(BELLHOP3D) · centerline y = 12 km range–depth slice</p>
+    <div class="ctl">
+      <label>Model <select class="sel" id="diffmodel"></select></label>
+      <span id="diffinfo"></span>
+    </div>
+    <canvas id="diffcanvas" width="660" height="280"></canvas>
+    <button class="mini" id="diffclose">✕ Close</button>
+  </div>
+</div>
+
+<footer id="foot">© 2026 · Developed by
+  <a href="https://huguryildiz.com/" target="_blank" rel="noopener">Hüseyin Uğur Yıldız</a></footer>
+
+<script src="harness.js?v=6"></script>
+</body>
+</html>
