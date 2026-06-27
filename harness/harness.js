@@ -423,6 +423,18 @@ document.getElementById('diffclose').onclick=()=>{diffOpen=false;
   document.getElementById('diffbtn').classList.remove('on');};
 document.getElementById('diffmodel').onchange=drawDiff;
 
+/* ---- cinema / minimize mode ---- */
+(function(){
+  const btn=document.getElementById('cinema-btn'); if(!btn)return;
+  let on=false;
+  btn.onclick=()=>{
+    on=!on;
+    document.body.classList.toggle('cinema',on);
+    btn.classList.toggle('on',on);
+    broadcast({type:'hide_ui',hidden:on});
+  };
+})();
+
 /* ---- mobile hamburger menu (collapses the toolbar in portrait) ---- */
 (function(){
   const bar=document.getElementById('bar'), ham=document.getElementById('hamburger');
@@ -431,7 +443,7 @@ document.getElementById('diffmodel').onchange=drawDiff;
   ham.onclick=()=>set(!bar.classList.contains('nav-open'));
   /* tapping a one-shot action closes the drawer; Fan/View stay open to interact */
   document.getElementById('bar-actions').addEventListener('click',e=>{
-    if(e.target.closest('#play,#reset,#camreset,#diffbtn,#scorebtn,#physicsbtn'))set(false);
+    if(e.target.closest('#play,#reset,#camreset,#cinema-btn,#diffbtn,#scorebtn,#physicsbtn'))set(false);
   });
 })();
 

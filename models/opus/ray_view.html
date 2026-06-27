@@ -1028,5 +1028,17 @@ resize(); drawColorbar(); setBeamLabels();
 requestAnimationFrame(frame);
 setTimeout(()=>{ STATE=precompute(41,31); pushMetrics(STATE); camDirty=true; projCacheDirty=true; $('overlay').classList.add('hidden'); },40);
 </script>
+<script>
+(function(){
+  var UI_SELS=['#legend','#metrics','#cbar','#xsecWrap','#arrWrap','#controls','.hint'];
+  window.addEventListener('message',function(e){
+    if(!e.data||e.data.type!=='hide_ui')return;
+    var v=e.data.hidden?'none':'';
+    UI_SELS.forEach(function(s){
+      document.querySelectorAll(s).forEach(function(el){el.style.display=v;});
+    });
+  });
+})();
+</script>
 </body>
 </html>
