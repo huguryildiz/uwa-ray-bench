@@ -789,5 +789,17 @@ setTimeout(() => {
 }, 100);
 
 </script>
+<script>
+(function(){
+  var UI_SELS=['#controls','#metrics','#panel-2d','#panel-arrivals','#cam-hud'];
+  window.addEventListener('message',function(e){
+    if(!e.data||e.data.type!=='hide_ui')return;
+    var v=e.data.hidden?'none':'';
+    UI_SELS.forEach(function(s){
+      document.querySelectorAll(s).forEach(function(el){el.style.display=v;});
+    });
+  });
+})();
+</script>
 </body>
 </html>

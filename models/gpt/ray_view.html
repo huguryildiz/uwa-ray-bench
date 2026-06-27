@@ -2433,5 +2433,17 @@ ASSUMPTIONS AND NUMERICAL MODEL
 
     init();
   </script>
+<script>
+(function(){
+  var UI_SELS=['.topbar','#legend','#statusPanel','#colorbar'];
+  window.addEventListener('message',function(e){
+    if(!e.data||e.data.type!=='hide_ui')return;
+    var v=e.data.hidden?'none':'';
+    UI_SELS.forEach(function(s){
+      document.querySelectorAll(s).forEach(function(el){el.style.display=v;});
+    });
+  });
+})();
+</script>
 </body>
 </html>
