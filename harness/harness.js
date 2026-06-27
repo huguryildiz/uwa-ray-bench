@@ -293,17 +293,7 @@ document.getElementById('opac').oninput=e=>broadcast({type:'set_opacity',v:+e.ta
 document.querySelectorAll('.tab-btn').forEach(btn=>{btn.onclick=()=>switchTab(btn.dataset.tab);});
 document.querySelectorAll('.focus-overlay').forEach(ov=>{ov.onclick=()=>switchTab(ov.dataset.focus);});
 
-/* overview: play-on-hover — only the hovered panel animates; prevents 4 concurrent WebGL renders */
-document.querySelectorAll('.cell[data-id]').forEach(cell=>{
-  const id=cell.dataset.id;
-  cell.addEventListener('mouseenter',()=>{
-    if(curTab==='overview'&&!playing)
-      PANELS.forEach(p=>send(p.id,p.id===id?{type:'play'}:{type:'pause'}));
-  });
-  cell.addEventListener('mouseleave',()=>{
-    if(curTab==='overview'&&!playing) send(id,{type:'pause'});
-  });
-});
+
 document.getElementById('scorebtn').onclick=()=>switchTab('scorecard');
 document.getElementById('physicsbtn').onclick=()=>switchTab('scorecard');
 document.getElementById('diffbtn').onclick=e=>{diffOpen=true;
