@@ -46,7 +46,7 @@ function switchTab(name){
   const active=name==='overview'?[...MODELS]:
     MODELS.includes(name)?[name]:name==='reference'?['reference']:[];
   PANELS.forEach(p=>{
-    if(active.includes(p.id)){if(playing)send(p.id,{type:'play'});}
+    if(active.includes(p.id)){send(p.id,{type:playing?'play':'pause'});}
     else send(p.id,{type:'pause'});
   });
 }
@@ -245,7 +245,8 @@ addEventListener('message',e=>{
     case'ready':{ const rid=m.panel||id; if(rid){clearWait(rid);
         send(rid,{type:'set_stop',elev:curStop.elev,azim:curStop.azim});
         if(lastPose)send(rid,{type:'set_camera',pose:lastPose});
-        send(rid,{type:'request_metrics'});}
+        send(rid,{type:'request_metrics'});
+        if(!playing)send(rid,{type:'pause'});}
       break;}
     case'ray_metrics':{ const pid=m.panel||id; if(!pid)break; clearWait(pid);
       normalizeMetrics(m);
@@ -292,6 +293,18 @@ document.getElementById('volchk').onchange=e=>broadcast({type:'set_volume',on:e.
 document.getElementById('opac').oninput=e=>broadcast({type:'set_opacity',v:+e.target.value});
 document.querySelectorAll('.tab-btn').forEach(btn=>{btn.onclick=()=>switchTab(btn.dataset.tab);});
 document.querySelectorAll('.focus-overlay').forEach(ov=>{ov.onclick=()=>switchTab(ov.dataset.focus);});
+
+/* overview: play-on-hover — only the hovered panel animates; prevents 4 concurrent WebGL renders */
+document.querySelectorAll('.cell[data-id]').forEach(cell=>{
+  const id=cell.dataset.id;
+  cell.addEventListener('mouseenter',()=>{
+    if(curTab==='overview'&&!playing)
+      PANELS.forEach(p=>send(p.id,p.id===id?{type:'play'}:{type:'pause'}));
+  });
+  cell.addEventListener('mouseleave',()=>{
+    if(curTab==='overview'&&!playing) send(id,{type:'pause'});
+  });
+});
 document.getElementById('scorebtn').onclick=()=>switchTab('scorecard');
 document.getElementById('physicsbtn').onclick=()=>switchTab('scorecard');
 document.getElementById('diffbtn').onclick=e=>{diffOpen=true;
@@ -334,7 +347,7 @@ document.getElementById('diffmodel').onchange=drawDiff;
     link.type='image/png'; link.href=c.toDataURL('image/png');
     a=(a+0.18)%(Math.PI*2);
   }
-  frame(); setInterval(frame,80);
+  frame(); setInterval(frame,500);
 })();
 
 /* ---- boot ---- */
