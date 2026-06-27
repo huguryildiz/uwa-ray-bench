@@ -1,0 +1,13 @@
+# BELLHOP scratch (regenerable; ~3.4 GB) — never commit
+reference/bellhop3d/_run/
+
+# Python env
+.venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Reference data is shipped (55 MB of .bin + manifest) — KEEP it tracked.
+# If it ever grows past GitHub limits, move reference/data/ to Git LFS.

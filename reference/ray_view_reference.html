@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<!-- ============================================================================
+ BELLHOP3D REFERENCE PANEL  (uwa-ray-bench)
+ -----------------------------------------------------------------------------
+ Ground-truth panel for the 3D underwater acoustic ray-propagation benchmark.
+ This is NOT a language-model output: it renders a precomputed genuine-3D
+ BELLHOP3D solve. It uses the SHARED infra renderer (vanilla JS + raw WebGL) and
+ is loaded by harness/index.html as the bottom-right reference iframe.
+
+ Data contract (see docs/benchmark_spec.md "Reference implementation"):
+   reference/data/<elev>x<azim>.bin  (25 snap-grid stops) + manifest.json
+   .bin layout (little-endian):
+     [4B "URB1"][u32 hdrLen][hdrLen JSON header]
+     [NX*NY*NZ Float32 TL field, dB, x-fastest]
+     per ray: [int32 npts][int16 npts*3 xyz quantized][float32 npts travel-time]
+   Int16 dequant: coord = lo + ((q+32767)/65534)*(hi-lo)   (box in metres).
+
+ Shared contract with the harness (postMessage, no network to parent):
+   emits  : {type:'ray_metrics', panel:'reference', ...card, tl:Float32(101*49*31)}
+            {type:'camera', pose}                (on local orbit, for sync)
+            {type:'cursor_screen', nx,ny}         (hover readout)
+            {type:'ready', panel:'reference'}
+   accepts: {type:'set_camera', pose}  {type:'set_stop', elev,azim}
+            {type:'play'} {type:'pause'} {type:'reset'}
+            {type:'set_volume', on} {type:'set_opacity', v} {type:'request_metrics'}
+
+ Scenario (analytic, identical for all panels):
+   c(z): 0..200m  1520 - 0.10 z ;  z>200  1500 + 0.018 (z-200)   (min at 200 m)
+   D(x,y) = 2500 - 1500*exp(-(((x-18)/2.5)^2+((y-12)/3)^2))
+                 - 1900*exp(-(((x-34)/2.0)^2+((y-9)/2.5)^2))      (km in, m out)
+   S=(0,12,50m)  R=(40,9,1000m)   domain x0..50km y0..24km z0..3000m (z down)
+   Vertical exaggeration in the scene = 8x (documented; horizontal aspect kept).
+============================================================================ -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BELLHOP3D Reference</title>
+<style>
+  @font-face{font-family:Newsreader;src:url(../fonts/newsreader-600.woff2) format('woff2');font-weight:600;font-display:swap}
+  @font-face{font-family:'IBM Plex Sans';src:url(../fonts/plexsans-400.woff2) format('woff2');font-weight:400;font-display:swap}
+  @font-face{font-family:'IBM Plex Mono';src:url(../fonts/plexmono-400.woff2) format('woff2');font-weight:400;font-display:swap}
+  @font-face{font-family:'IBM Plex Mono';src:url(../fonts/plexmono-500.woff2) format('woff2');font-weight:500;font-display:swap}
+  :root{--glass:linear-gradient(160deg,rgba(20,26,60,.70),rgba(9,11,30,.80));
+    --hair:rgba(100,140,255,.18);--cyan:#2dd4bf;--green:#39ff85;--ink:#e2e6f0;--muted:#7a82a6;
+    --blur:blur(18px) saturate(140%);--fmono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+    --head:Newsreader,Georgia,serif}
+  html,body{margin:0;height:100%;background:#06060f;overflow:hidden;
+    font:12px/1.4 'IBM Plex Sans',system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink)}
+  #wrap{position:fixed;inset:0}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #gl{z-index:1} #ov{z-index:2;pointer-events:none}
+
+  /* ---- DRAWER (B): right-edge metrics panel ---- */
+  #drawer{position:absolute;right:0;top:0;bottom:38px;z-index:3;
+    display:flex;flex-direction:row-reverse;pointer-events:none}
+  #drawer-tab{width:28px;background:var(--glass);border-left:1px solid var(--hair);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;pointer-events:all;writing-mode:vertical-rl;
+    text-orientation:mixed;transform:rotate(180deg);
+    font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--cyan);
+    user-select:none;transition:background .15s;
+    box-shadow:-4px 0 16px -4px rgba(0,0,0,.4)}
+  #drawer-tab:hover{background:linear-gradient(160deg,rgba(30,40,80,.88),rgba(15,18,50,.92))}
+  #drawer-panel{width:0;overflow:hidden;
+    background:var(--glass);border-left:1px solid var(--hair);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    box-shadow:-8px 0 30px -8px rgba(0,0,0,.5);
+    transition:width .22s cubic-bezier(.4,0,.2,1);
+    pointer-events:all;display:flex;flex-direction:column}
+  #drawer.open #drawer-panel{width:210px}
+  #drawer-head{display:flex;align-items:center;justify-content:space-between;
+    padding:11px 13px 8px;border-bottom:1px solid var(--hair);flex-shrink:0}
+  #drawer-head h4{margin:0;font-size:8.5px;color:var(--cyan);letter-spacing:.2em;text-transform:uppercase}
+  #drawer-close{background:rgba(20,35,62,.5);color:var(--muted);border:1px solid var(--hair);
+    border-radius:7px;width:21px;height:21px;padding:0;font-size:11px;font-weight:600;line-height:1;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+  #drawer-close:hover{border-color:rgba(150,210,255,.34);color:var(--ink)}
+  #cardbody-wrap{padding:10px 13px;overflow-y:auto;flex:1;scrollbar-width:thin;scrollbar-color:rgba(100,140,255,.25) transparent}
+  #cardbody-wrap::-webkit-scrollbar{width:4px}
+  #cardbody-wrap::-webkit-scrollbar-track{background:transparent}
+  #cardbody-wrap::-webkit-scrollbar-thumb{background:rgba(100,140,255,.25);border-radius:4px}
+  #cardbody-wrap::-webkit-scrollbar-thumb:hover{background:rgba(100,140,255,.45)}
+  /* KPI tiles (generated by refreshCard into #cardbody) */
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  .kpi{background:rgba(255,255,255,.035);border:1px solid rgba(150,180,255,.10);
+    border-radius:9px;padding:7px 9px 8px;display:flex;flex-direction:column;gap:4px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+  .kpi .k{font-size:7.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted)}
+  .kpi .v{font-family:var(--fmono);font-variant-numeric:tabular-nums;
+    font-size:16px;font-weight:600;color:#eaf3ff;line-height:1;white-space:nowrap}
+  .kpi .u{font-size:9px;color:var(--muted);font-weight:400;letter-spacing:.02em}
+  .status{margin-top:8px;text-align:center;font-family:var(--fmono);font-size:9.5px;
+    letter-spacing:.04em;padding:5px 8px;border-radius:8px;border:1px solid transparent}
+  .status.ok{color:#39d98a;background:rgba(57,217,138,.08);border-color:rgba(57,217,138,.22)}
+  .status.flag{color:#ffb867;background:rgba(255,184,103,.08);border-color:rgba(255,184,103,.24)}
+
+  /* ---- DOCK BAR (A): bottom control strip ---- */
+  #dock{position:absolute;left:0;right:28px;bottom:0;z-index:3;height:38px;
+    display:flex;align-items:center;gap:5px;padding:0 10px;
+    background:var(--glass);border-top:1px solid var(--hair);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    box-shadow:0 -6px 24px -8px rgba(0,0,0,.5)}
+  #dock button{background:rgba(20,35,62,.5);color:var(--ink);border:1px solid var(--hair);
+    border-radius:7px;padding:0 9px;height:24px;font-size:12px;font-weight:600;
+    cursor:pointer;transition:.15s;white-space:nowrap;display:flex;align-items:center}
+  #dock button:hover{border-color:rgba(150,210,255,.34);transform:translateY(-1px)}
+  #dock .sep{width:1px;height:18px;background:var(--hair);flex-shrink:0;margin:0 2px}
+  #dock #scrub{flex:1;min-width:60px}
+  #dock select{background:rgba(20,35,62,.5);color:var(--ink);border:1px solid var(--hair);
+    border-radius:7px;padding:0 4px;font-size:11px;cursor:pointer;height:24px}
+  #dock .lbl{color:var(--muted);font-size:10px;white-space:nowrap}
+  #dock .vol-lbl{color:var(--muted);font-size:10px;display:flex;align-items:center;gap:3px;white-space:nowrap}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:4px;border-radius:3px;
+    background:linear-gradient(90deg,#2bb8e8,#5fe3ff);vertical-align:middle}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+    background:#eafaff;box-shadow:0 0 9px rgba(95,227,255,.9);cursor:pointer}
+  input[type=checkbox]{accent-color:var(--cyan)}
+  #dock #speed{width:58px}
+  #dock #opac{width:52px}
+  #loading{position:absolute;inset:0;z-index:4;display:flex;align-items:center;
+    justify-content:center;background:#04080f;color:var(--cyan);font-size:13px;letter-spacing:.04em}
+  @media (max-width:460px){
+    #dock{gap:4px;padding:0 8px;right:0}
+    #dock .lbl,#dock .sep,#dock #camreset,#dock #speed,#dock #opac{display:none}
+    #dock .vol-lbl{gap:4px}
+    #dock #scrub{min-width:50px}
+    #dock select{font-size:10px;padding:0 2px}
+    #drawer-tab{font-size:7px;letter-spacing:.12em}
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="gl"></canvas>
+  <canvas id="ov"></canvas>
+  <!-- B: right-edge metrics drawer -->
+  <div id="drawer">
+    <div id="drawer-tab">METRICS</div>
+    <div id="drawer-panel">
+      <div id="drawer-head"><h4>REFERENCE METRICS</h4>
+        <button id="drawer-close" title="Close">✕</button></div>
+      <div id="cardbody-wrap"><div id="cardbody">…</div></div>
+    </div>
+  </div>
+  <!-- A: bottom dock bar -->
+  <div id="dock">
+    <button id="play">▶ Play</button>
+    <button id="reset">⟲ Reset</button>
+    <button id="camreset">⌖ Cam</button>
+    <div class="sep"></div>
+    <span class="lbl">fan</span>
+    <select id="elevsel"></select><span class="lbl">×</span><select id="azimsel"></select>
+    <div class="sep"></div>
+    <input id="scrub" type="range" min="0" max="1" step="0.001" value="0">
+    <div class="sep"></div>
+    <span class="lbl">spd</span><input id="speed" type="range" min="0.25" max="4" step="0.25" value="1">
+    <div class="sep"></div>
+    <label class="vol-lbl"><input id="volchk" type="checkbox" checked>TL</label>
+    <span class="lbl">α</span><input id="opac" type="range" min="0" max="1" step="0.02" value="0.5">
+  </div>
+  <div id="loading">loading reference…</div>
+</div>
+<script>
+"use strict";
+/* ========================= scenario constants ========================= */
+const X_MAX=50, Y_MAX=24, Z_MAX=3000;          // km, km, m
+const SRC={x:0,y:12,z:50}, RCV={x:40,y:9,z:1000};
+const NX=101, NY=49, NZ=31, TL_SHADOW=120;
+const VEXAG=8, S=2/X_MAX;                       // scene scale: range -> [-1,1]
+function soundSpeed(z){return z<=200?1520-0.10*z:1500+0.018*(z-200);}
+function bathy(xk,yk){return 2500
+  -1500*Math.exp(-((((xk-18)/2.5)**2)+(((yk-12)/3.0)**2)))
+  -1900*Math.exp(-((((xk-34)/2.0)**2)+(((yk-9)/2.5)**2)));}
+// world (x km, y km, z m, z down) -> scene (X range, Y up, Z cross-range)
+function toScene(xk,yk,zm){return [ (xk-X_MAX/2)*S, (Z_MAX/2-zm)*S*VEXAG/1000, (yk-Y_MAX/2)*S ];}
+
+/* ========================= tiny mat4 ========================= */
+const M={
+  mul(a,b){const o=new Float32Array(16);for(let r=0;r<4;r++)for(let c=0;c<4;c++){
+    let s=0;for(let k=0;k<4;k++)s+=a[k*4+r]*b[c*4+k];o[c*4+r]=s;}return o;},
+  persp(fov,asp,n,f){const t=1/Math.tan(fov/2),o=new Float32Array(16);
+    o[0]=t/asp;o[5]=t;o[10]=(f+n)/(n-f);o[11]=-1;o[14]=2*f*n/(n-f);return o;},
+  lookAt(e,c,up){const z=norm(sub(e,c)),x=norm(cross(up,z)),y=cross(z,x);
+    return new Float32Array([x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0,
+      -dot(x,e),-dot(y,e),-dot(z,e),1]);},
+  invert(m){const i=new Float32Array(16),a=m;
+    i[0]=a[5]*a[10]*a[15]-a[5]*a[11]*a[14]-a[9]*a[6]*a[15]+a[9]*a[7]*a[14]+a[13]*a[6]*a[11]-a[13]*a[7]*a[10];
+    i[4]=-a[4]*a[10]*a[15]+a[4]*a[11]*a[14]+a[8]*a[6]*a[15]-a[8]*a[7]*a[14]-a[12]*a[6]*a[11]+a[12]*a[7]*a[10];
+    i[8]=a[4]*a[9]*a[15]-a[4]*a[11]*a[13]-a[8]*a[5]*a[15]+a[8]*a[7]*a[13]+a[12]*a[5]*a[11]-a[12]*a[7]*a[9];
+    i[12]=-a[4]*a[9]*a[14]+a[4]*a[10]*a[13]+a[8]*a[5]*a[14]-a[8]*a[6]*a[13]-a[12]*a[5]*a[10]+a[12]*a[6]*a[9];
+    i[1]=-a[1]*a[10]*a[15]+a[1]*a[11]*a[14]+a[9]*a[2]*a[15]-a[9]*a[3]*a[14]-a[13]*a[2]*a[11]+a[13]*a[3]*a[10];
+    i[5]=a[0]*a[10]*a[15]-a[0]*a[11]*a[14]-a[8]*a[2]*a[15]+a[8]*a[3]*a[14]+a[12]*a[2]*a[11]-a[12]*a[3]*a[10];
+    i[9]=-a[0]*a[9]*a[15]+a[0]*a[11]*a[13]+a[8]*a[1]*a[15]-a[8]*a[3]*a[13]-a[12]*a[1]*a[11]+a[12]*a[3]*a[9];
+    i[13]=a[0]*a[9]*a[14]-a[0]*a[10]*a[13]-a[8]*a[1]*a[14]+a[8]*a[2]*a[13]+a[12]*a[1]*a[10]-a[12]*a[2]*a[9];
+    i[2]=a[1]*a[6]*a[15]-a[1]*a[7]*a[14]-a[5]*a[2]*a[15]+a[5]*a[3]*a[14]+a[13]*a[2]*a[7]-a[13]*a[3]*a[6];
+    i[6]=-a[0]*a[6]*a[15]+a[0]*a[7]*a[14]+a[4]*a[2]*a[15]-a[4]*a[3]*a[14]-a[12]*a[2]*a[7]+a[12]*a[3]*a[6];
+    i[10]=a[0]*a[5]*a[15]-a[0]*a[7]*a[13]-a[4]*a[1]*a[15]+a[4]*a[3]*a[13]+a[12]*a[1]*a[7]-a[12]*a[3]*a[5];
+    i[14]=-a[0]*a[5]*a[14]+a[0]*a[6]*a[13]+a[4]*a[1]*a[14]-a[4]*a[2]*a[13]-a[12]*a[1]*a[6]+a[12]*a[2]*a[5];
+    i[3]=-a[1]*a[6]*a[11]+a[1]*a[7]*a[10]+a[5]*a[2]*a[11]-a[5]*a[3]*a[10]-a[9]*a[2]*a[7]+a[9]*a[3]*a[6];
+    i[7]=a[0]*a[6]*a[11]-a[0]*a[7]*a[10]-a[4]*a[2]*a[11]+a[4]*a[3]*a[10]+a[8]*a[2]*a[7]-a[8]*a[3]*a[6];
+    i[11]=-a[0]*a[5]*a[11]+a[0]*a[7]*a[9]+a[4]*a[1]*a[11]-a[4]*a[3]*a[9]-a[8]*a[1]*a[7]+a[8]*a[3]*a[5];
+    i[15]=a[0]*a[5]*a[10]-a[0]*a[6]*a[9]-a[4]*a[1]*a[10]+a[4]*a[2]*a[9]+a[8]*a[1]*a[6]-a[8]*a[2]*a[5];
+    let det=a[0]*i[0]+a[1]*i[4]+a[2]*i[8]+a[3]*i[12]; if(!det)return null; det=1/det;
+    for(let k=0;k<16;k++)i[k]*=det; return i;}
+};
+function sub(a,b){return[a[0]-b[0],a[1]-b[1],a[2]-b[2]];}
+function cross(a,b){return[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];}
+function dot(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];}
+function norm(a){const l=Math.hypot(a[0],a[1],a[2])||1;return[a[0]/l,a[1]/l,a[2]/l];}
+
+/* ========================= GL setup ========================= */
+const glc=document.getElementById('gl'), ov=document.getElementById('ov'),
+      octx=ov.getContext('2d');
+const gl=glc.getContext('webgl',{antialias:true,alpha:false});
+if(!gl){document.getElementById('loading').textContent='WebGL unavailable';}
+function sh(t,src){const s=gl.createShader(t);gl.shaderSource(s,src);gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw gl.getShaderInfoLog(s);return s;}
+function prog(vs,fs){const p=gl.createProgram();
+  gl.attachShader(p,sh(gl.VERTEX_SHADER,vs));gl.attachShader(p,sh(gl.FRAGMENT_SHADER,fs));
+  gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw gl.getProgramInfoLog(p);
+  return p;}
+
+// flat colored (box, surface plane, S/R markers) — per-vertex color, uniform alpha
+const pFlat=prog(
+ `attribute vec3 a_pos;attribute vec3 a_col;uniform mat4 u_mvp;uniform float u_psize;
+  varying vec3 v_col;void main(){gl_Position=u_mvp*vec4(a_pos,1.);v_col=a_col;gl_PointSize=u_psize;}`,
+ `precision mediump float;varying vec3 v_col;uniform float u_alpha;uniform float u_round;
+  void main(){if(u_round>.5){vec2 d=gl_PointCoord-vec2(.5);if(dot(d,d)>.25)discard;}
+   gl_FragColor=vec4(v_col,u_alpha);}`);
+// lit seabed surface
+const pSurf=prog(
+ `attribute vec3 a_pos;attribute vec3 a_nrm;uniform mat4 u_mvp;
+  varying vec3 v_n;varying float v_d;void main(){gl_Position=u_mvp*vec4(a_pos,1.);
+   v_n=a_nrm;v_d=a_pos.y;}`,
+ `precision mediump float;varying vec3 v_n;varying float v_d;
+  void main(){vec3 n=normalize(v_n);vec3 L=normalize(vec3(.4,.9,.5));
+   float dif=max(dot(n,L),0.);float rim=pow(1.-abs(n.y),2.);
+   vec3 base=mix(vec3(.36,.30,.20),vec3(.62,.55,.34),clamp(v_d*2.+.5,0.,1.));
+   vec3 c=base*(.35+.75*dif)+vec3(.5,.65,.8)*rim*.35;
+   gl_FragColor=vec4(c,1.);}`);
+// rays: per-vertex travel time -> wavefront sweep + faded trail
+const pRay=prog(
+ `attribute vec3 a_pos;attribute vec3 a_col;attribute float a_t;
+  uniform mat4 u_mvp;uniform float u_time;varying vec3 v_col;varying float v_a;
+  void main(){gl_Position=u_mvp*vec4(a_pos,1.);v_col=a_col;
+   float age=u_time-a_t;
+   v_a = age<0.0 ? 0.0 : clamp(0.18+0.9*exp(-age*0.9),0.0,1.0);
+   if(age>=0.0 && age<0.35) v_col=mix(v_col,vec3(1.0),0.6*(1.0-age/0.35)); }`,
+ `precision mediump float;varying vec3 v_col;varying float v_a;uniform float u_mul;
+  void main(){if(v_a<=0.001)discard;gl_FragColor=vec4(v_col,v_a*u_mul);}`);
+// insonified TL volume point-splat
+const pVol=prog(
+ `attribute vec3 a_pos;attribute vec3 a_col;uniform mat4 u_mvp;uniform float u_psize;
+  varying vec3 v_col;void main(){gl_Position=u_mvp*vec4(a_pos,1.);v_col=a_col;
+   gl_PointSize=u_psize;}`,
+ `precision mediump float;varying vec3 v_col;uniform float u_op;
+  void main(){vec2 d=gl_PointCoord-vec2(.5);float r=dot(d,d);if(r>.25)discard;
+   float a=u_op*(1.-r*4.);gl_FragColor=vec4(v_col,a);}`);
+// fullscreen water gradient backdrop
+const pBg=prog(
+ `attribute vec2 a_pos;varying vec2 v_uv;void main(){v_uv=a_pos*.5+.5;
+   gl_Position=vec4(a_pos,0.,1.);}`,
+ `precision mediump float;varying vec2 v_uv;void main(){
+   vec3 top=vec3(.07,.16,.28),bot=vec3(.01,.02,.05);
+   gl_FragColor=vec4(mix(bot,top,pow(v_uv.y,1.3)),1.);}`);
+
+function buf(data){const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
+  gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);return b;}
+
+/* ========================= static geometry ========================= */
+const bgBuf=buf(new Float32Array([-1,-1,1,-1,-1,1, -1,1,1,-1,1,1]));
+
+// bounding box (12 edges)
+const boxBuf=(()=>{const c=[[0,0,0],[X_MAX,0,0],[X_MAX,Y_MAX,0],[0,Y_MAX,0],
+  [0,0,Z_MAX],[X_MAX,0,Z_MAX],[X_MAX,Y_MAX,Z_MAX],[0,Y_MAX,Z_MAX]];
+  const E=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+  const a=[];for(const[i,j]of E){const p=toScene(...c[i]),q=toScene(...c[j]);
+    a.push(...p,.45,.62,.85,...q,.45,.62,.85);}return{b:buf(new Float32Array(a)),n:E.length*2};})();
+// faint surface plane z=0
+const surfBuf=(()=>{const p=[[0,0,0],[X_MAX,0,0],[X_MAX,Y_MAX,0],[0,Y_MAX,0]];
+  const tr=[0,1,2,0,2,3],a=[];for(const i of tr){const s=toScene(...p[i]);
+    a.push(...s,.30,.62,.85);}return buf(new Float32Array(a));})();
+
+// seabed mesh from analytic D(x,y), with normals
+const seabed=(()=>{const gx=120,gy=64,verts=[];
+  const P=(i,j)=>{const xk=i/gx*X_MAX, yk=j/gy*Y_MAX; return toScene(xk,yk,bathy(xk,yk));};
+  function nrm(i,j){const e=1e-3;const xk=i/gx*X_MAX,yk=j/gy*Y_MAX;
+    const dDx=(bathy(xk+e,yk)-bathy(xk-e,yk))/(2*e);   // m per km
+    const dDy=(bathy(xk,yk+e)-bathy(xk,yk-e))/(2*e);
+    // scene Y = (Zmax/2 - z)*S*VEXAG/1000 ; dY/dx_km = -dDx*S*VEXAG/1000, dX/dx_km=S, etc.
+    return norm([dDx*VEXAG/1000, 1, dDy*VEXAG/1000]);}
+  for(let i=0;i<gx;i++)for(let j=0;j<gy;j++){
+    const a=P(i,j),b=P(i+1,j),c=P(i+1,j+1),d=P(i,j+1);
+    const na=nrm(i,j),nb=nrm(i+1,j),nc=nrm(i+1,j+1),nd=nrm(i,j+1);
+    verts.push(...a,...na,...b,...nb,...c,...nc, ...a,...na,...c,...nc,...d,...nd);}
+  return{b:buf(new Float32Array(verts)),n:verts.length/6};})();
+
+// S / R markers (gl.POINTS)
+const markBuf=buf(new Float32Array([
+  ...toScene(SRC.x,SRC.y,SRC.z), 1.0,.92,.6,
+  ...toScene(RCV.x,RCV.y,RCV.z), .25,.85,1.0 ]));
+
+/* ========================= per-stop dynamic geometry ========================= */
+let rayGeo=null, volGeo=null, tlField=null, curHdr=null, tMax=1;
+function hueRGB(h){h=(h%1+1)%1;const k=t=>{const a=Math.abs(((h*6+t)%6)-3)-1;
+  return Math.max(0,Math.min(1,a));};return[k(0),k(4),k(2)];} // simple rainbow
+function tlColor(tl){ // 45..115 dB -> warm(loud)->cool/dark(quiet)
+  const t=Math.max(0,Math.min(1,(tl-45)/70));
+  const r=Math.min(1,Math.max(0,1.4*t-0.2)), g=Math.sin(Math.PI*t),
+        b=Math.min(1,Math.max(0,1.2-1.6*t));return[r*.9+.1,g*.85,b*.95];}
+
+function buildStop(buffer){
+  const dv=new DataView(buffer);
+  if(String.fromCharCode(dv.getUint8(0),dv.getUint8(1),dv.getUint8(2),dv.getUint8(3))!=='URB1')
+    throw 'bad magic';
+  let off=4; const hdrLen=dv.getUint32(off,true); off+=4;
+  const hdr=JSON.parse(new TextDecoder().decode(new Uint8Array(buffer,off,hdrLen)));
+  off+=hdrLen; curHdr=hdr;
+  const g=hdr.grid, nTL=g.nx*g.ny*g.nz;
+  tlField=new Float32Array(buffer.slice(off,off+nTL*4)); off+=nTL*4;
+  const q=hdr.quant_box_m, deq=(v,lo,hi)=>lo+((v+32767)/65534)*(hi-lo);
+
+  // ---- rays -> line segments ----
+  const nr=hdr.n_rays; const pos=[],col=[],tim=[];
+  for(let r=0;r<nr;r++){
+    const npts=dv.getInt32(off,true);off+=4;
+    const xs=new Array(npts),ys=new Array(npts),zs=new Array(npts);
+    for(let p=0;p<npts;p++){
+      const qx=dv.getInt16(off,true),qy=dv.getInt16(off+2,true),qz=dv.getInt16(off+4,true);off+=6;
+      const xm=deq(qx,q.xmin,q.xmax),ym=deq(qy,q.ymin,q.ymax),zm=deq(qz,q.zmin,q.zmax);
+      const sc=toScene(xm/1000,ym/1000,zm); xs[p]=sc[0];ys[p]=sc[1];zs[p]=sc[2];}
+    const ts=new Float32Array(npts);
+    for(let p=0;p<npts;p++){ts[p]=dv.getFloat32(off,true);off+=4;}
+    const c=hueRGB(0.75*r/Math.max(1,nr-1)); // launch-angle rainbow (index proxy)
+    for(let p=0;p<npts-1;p++){
+      pos.push(xs[p],ys[p],zs[p], xs[p+1],ys[p+1],zs[p+1]);
+      col.push(c[0],c[1],c[2],c[0],c[1],c[2]); tim.push(ts[p],ts[p+1]);}
+    if(ts[npts-1]>tMax)tMax=ts[npts-1];
+  }
+  rayGeo={pos:buf(new Float32Array(pos)),col:buf(new Float32Array(col)),
+    tim:buf(new Float32Array(tim)),n:tim.length};
+
+  // ---- insonified TL volume (point-splat, TL<120) ----
+  const vp=[],vc=[]; let ins=0;
+  for(let iz=0;iz<g.nz;iz++)for(let iy=0;iy<g.ny;iy++)for(let ix=0;ix<g.nx;ix++){
+    const tl=tlField[ix+iy*g.nx+iz*g.nx*g.ny];
+    if(tl<TL_SHADOW){ins++;
+      const xk=ix/(g.nx-1)*X_MAX, yk=iy/(g.ny-1)*Y_MAX, zm=iz/(g.nz-1)*Z_MAX;
+      const sc=toScene(xk,yk,zm); vp.push(sc[0],sc[1],sc[2]);
+      const c=tlColor(tl); vc.push(c[0],c[1],c[2]);}}
+  volGeo={pos:buf(new Float32Array(vp)),col:buf(new Float32Array(vc)),n:vp.length/3};
+  return {nr, insFrac:ins/nTL};
+}
+
+/* ========================= camera ========================= */
+let cam={yaw:1.0, pitch:0.72, dist:3.3}, mvp=new Float32Array(16);
+function camDefault(){cam={yaw:1.0,pitch:0.72,dist:3.3};}
+function updateMVP(){
+  const asp=glc.width/glc.height;
+  const eye=[cam.dist*Math.cos(cam.pitch)*Math.cos(cam.yaw),
+            cam.dist*Math.sin(cam.pitch),
+            cam.dist*Math.cos(cam.pitch)*Math.sin(cam.yaw)];
+  mvp=M.mul(M.persp(0.9,asp,0.05,40),M.lookAt(eye,[0,0,0],[0,1,0]));
+}
+function project(sx,sy,sz){const x=mvp[0]*sx+mvp[4]*sy+mvp[8]*sz+mvp[12],
+  y=mvp[1]*sx+mvp[5]*sy+mvp[9]*sz+mvp[13], w=mvp[3]*sx+mvp[7]*sy+mvp[11]*sz+mvp[15];
+  if(w<=0)return null;return{x:(x/w*.5+.5)*ov.width/dpr,y:(1-(y/w*.5+.5))*ov.height/dpr};}
+
+/* ========================= draw ========================= */
+let playing=false, curTime=0, lastT=0, fps=60, fpsAcc=0, fpsN=0;
+let showVol=true, volOp=0.5, speed=1;
+function frame(now){
+  const dt=(now-lastT)/1000||0; lastT=now;
+  if(playing){curTime+=dt*speed*tMax/14; if(curTime>tMax*1.25)curTime=tMax*1.25;
+    document.getElementById('scrub').value=Math.min(1,curTime/(tMax*1.25));}
+  if(dt>0){fpsAcc+=1/dt;fpsN++; if(fpsN>=30){fps=fpsAcc/fpsN;fpsAcc=0;fpsN=0;refreshCard();}}
+  render(); requestAnimationFrame(frame);
+}
+function render(){
+  resize(); updateMVP();
+  gl.viewport(0,0,glc.width,glc.height);
+  gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+  gl.disable(gl.DEPTH_TEST);
+  gl.useProgram(pBg); bindA(pBg,'a_pos',bgBuf,2,2,0); gl.drawArrays(gl.TRIANGLES,0,6);
+  gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
+  // seabed (opaque, lit)
+  gl.useProgram(pSurf); gl.uniformMatrix4fv(u(pSurf,'u_mvp'),false,mvp);
+  bindA(pSurf,'a_pos',seabed.b,3,6,0); bindA(pSurf,'a_nrm',seabed.b,3,6,3);
+  gl.drawArrays(gl.TRIANGLES,0,seabed.n);
+  // transparent layers
+  gl.depthMask(false); gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+  // box
+  gl.useProgram(pFlat); gl.uniformMatrix4fv(u(pFlat,'u_mvp'),false,mvp);
+  gl.uniform1f(u(pFlat,'u_alpha'),.55); gl.uniform1f(u(pFlat,'u_psize'),1); gl.uniform1f(u(pFlat,'u_round'),0);
+  bindA(pFlat,'a_pos',boxBuf.b,3,6,0); bindA(pFlat,'a_col',boxBuf.b,3,6,3);
+  gl.drawArrays(gl.LINES,0,boxBuf.n);
+  // surface plane
+  gl.uniform1f(u(pFlat,'u_alpha'),.07);
+  bindA(pFlat,'a_pos',surfBuf,3,6,0); bindA(pFlat,'a_col',surfBuf,3,6,3);
+  gl.drawArrays(gl.TRIANGLES,0,6);
+  // TL volume
+  if(showVol&&volGeo){gl.useProgram(pVol);gl.uniformMatrix4fv(u(pVol,'u_mvp'),false,mvp);
+    gl.uniform1f(u(pVol,'u_psize'),5.5);gl.uniform1f(u(pVol,'u_op'),volOp);
+    bindA(pVol,'a_pos',volGeo.pos,3,3,0);bindA(pVol,'a_col',volGeo.col,3,3,0);
+    gl.drawArrays(gl.POINTS,0,volGeo.n);}
+  // rays (additive glow)
+  if(rayGeo){gl.blendFunc(gl.SRC_ALPHA,gl.ONE);gl.useProgram(pRay);
+    gl.uniformMatrix4fv(u(pRay,'u_mvp'),false,mvp);
+    gl.uniform1f(u(pRay,'u_time'),curTime);gl.uniform1f(u(pRay,'u_mul'),.85);
+    bindA(pRay,'a_pos',rayGeo.pos,3,3,0);bindA(pRay,'a_col',rayGeo.col,3,3,0);
+    bindA(pRay,'a_t',rayGeo.tim,1,1,0);
+    gl.drawArrays(gl.LINES,0,rayGeo.n);
+    gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);}
+  // S / R markers
+  gl.useProgram(pFlat);gl.uniform1f(u(pFlat,'u_alpha'),1);gl.uniform1f(u(pFlat,'u_round'),1);
+  gl.uniform1f(u(pFlat,'u_psize'),16);
+  bindA(pFlat,'a_pos',markBuf,3,6,0);bindA(pFlat,'a_col',markBuf,3,6,3);
+  gl.drawArrays(gl.POINTS,0,2);
+  gl.disable(gl.BLEND);
+  drawOverlay();
+}
+function u(p,n){return gl.getUniformLocation(p,n);}
+function bindA(p,name,b,size,stride,offset){const l=gl.getAttribLocation(p,name);
+  if(l<0)return;gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.enableVertexAttribArray(l);
+  gl.vertexAttribPointer(l,size,gl.FLOAT,false,stride*4,offset*4);}
+
+/* ========================= 2D overlay (labels/legend/colorbar) ========================= */
+function drawOverlay(){
+  octx.clearRect(0,0,ov.width,ov.height); octx.save(); octx.scale(dpr,dpr);
+  const W=ov.width/dpr,H=ov.height/dpr;
+  octx.font='11px -apple-system,sans-serif'; octx.textAlign='center';
+  octx.fillStyle='#9bb6d8';
+  for(let xk=0;xk<=X_MAX;xk+=10){const p=project(...toScene(xk,0,Z_MAX));
+    if(p)octx.fillText(xk+'km',p.x,p.y+12);}
+  let pl=project(...toScene(X_MAX/2,0,Z_MAX)); if(pl)octx.fillText('range x',pl.x,pl.y+24);
+  for(let yk=0;yk<=Y_MAX;yk+=8){const p=project(...toScene(X_MAX,yk,Z_MAX));
+    if(p)octx.fillText(yk+'km',p.x+2,p.y);}
+  octx.textAlign='right';
+  for(let zm=0;zm<=Z_MAX;zm+=1000){const p=project(...toScene(0,0,zm));
+    if(p)octx.fillText(zm+'m',p.x-6,p.y);}
+  octx.textAlign='center';
+  // S / R labels
+  const ps=project(...toScene(SRC.x,SRC.y,SRC.z));
+  if(ps){octx.fillStyle='#fff0c0';octx.font='bold 12px sans-serif';octx.fillText('S',ps.x,ps.y-12);}
+  const pr=project(...toScene(RCV.x,RCV.y,RCV.z));
+  if(pr){const reached=(stopSummary&&stopSummary.tl_R_dB<TL_SHADOW);
+    octx.strokeStyle=reached?'#39d98a':'#ff5a5a';octx.lineWidth=2;
+    octx.beginPath();octx.arc(pr.x,pr.y,11,0,7);octx.stroke();
+    octx.fillStyle='#9fe8ff';octx.font='bold 12px sans-serif';octx.fillText('R',pr.x,pr.y-14);}
+  // legend
+  octx.textAlign='left';octx.font='11px sans-serif';
+  const lg=[['#ffd36b','source S'],['#9fe8ff','receiver R'],
+    ['#b08c5a','seabed / seamounts'],['#6cf','rays (by launch angle)'],
+    ['#2aa0d0','insonified TL volume']];
+  let ly=H-214; octx.fillStyle='rgba(8,14,26,.6)';octx.fillRect(8,ly-14,156,18*lg.length+8);
+  for(const[c,t]of lg){octx.fillStyle=c;octx.fillRect(14,ly-9,10,10);
+    octx.fillStyle='#cfe3ff';octx.fillText(t,30,ly);ly+=18;}
+  // TL colorbar
+  if(showVol){const bx=W-58,by=70,bh=150;
+    for(let i=0;i<bh;i++){const tl=45+(i/bh)*70;const c=tlColor(tl);
+      octx.fillStyle=`rgb(${c.map(v=>v*255|0).join(',')})`;octx.fillRect(bx,by+bh-i,12,1);}
+    octx.fillStyle='#cfe3ff';octx.textAlign='right';
+    octx.fillText('45 dB',bx-3,by+bh);octx.fillText('115',bx-3,by+8);
+    octx.save();octx.translate(W-38,by+bh/2);octx.rotate(Math.PI/2);
+    octx.textAlign='center';octx.fillText('TL (dB)',0,0);octx.restore();}
+  octx.restore();
+}
+
+/* ========================= sizing ========================= */
+let dpr=1;
+function resize(){dpr=Math.min(2,window.devicePixelRatio||1);
+  const w=glc.clientWidth,h=glc.clientHeight;
+  const W=w*dpr|0,H=h*dpr|0;
+  if(glc.width!==W||glc.height!==H){glc.width=W;glc.height=H;ov.width=W;ov.height=H;}}
+
+/* ========================= metric card + postMessage ========================= */
+let stopSummary=null, manifest=null, curStop={elev:41,azim:31};
+function refreshCard(){
+  if(!stopSummary)return;
+  const off=!(curStop.elev===41&&curStop.azim===31);
+  const reached=stopSummary.tl_R_dB<TL_SHADOW;
+  document.getElementById('cardbody').innerHTML=
+   `<div class="kpis">`+
+   kpi('R reached', reached?'YES':'NO', '', reached?'#39d98a':'#ff5a5a')+
+   kpi('TL(R)', stopSummary.tl_R_dB.toFixed(1), 'dB')+
+   kpi('insonified', (stopSummary.insonified_frac*100).toFixed(1)+'%')+
+   kpi('shadow', ((1-stopSummary.insonified_frac)*100).toFixed(1)+'%')+
+   kpi('rays', stopSummary.n_rays, `${curStop.elev}×${curStop.azim}`)+
+   kpi('freq', manifest.freq_hz, 'Hz')+
+   kpi('FPS', fps.toFixed(0))+
+   `</div>`+
+   (off?`<div class="status flag">⚠ off-canonical (41×31)</div>`:
+        `<div class="status ok">✓ canonical 41×31</div>`);
+}
+function kpi(k,v,u='',color=''){return `<div class="kpi"><span class="k">${k}</span>`+
+  `<span class="v"${color?` style="color:${color}"`:''}>${v}`+
+  (u?` <span class="u">${u}</span>`:'')+`</span></div>`;}
+function postMetrics(){
+  if(!stopSummary||!tlField)return;
+  parent.postMessage({type:'ray_metrics', panel:'reference', label:'BELLHOP3D',
+    canonical:(curStop.elev===41&&curStop.azim===31),
+    stop:`${curStop.elev}x${curStop.azim}`,
+    reached:stopSummary.tl_R_dB<TL_SHADOW, tl_R:stopSummary.tl_R_dB,
+    insonified:stopSummary.insonified_frac, shadow:1-stopSummary.insonified_frac,
+    n_rays:stopSummary.n_rays, freq:manifest.freq_hz,
+    reciprocity:0, conv_ins:0, conv_tlR:0, out_of_plane:null,
+    fps:Math.round(fps), is_reference:true,
+    tl:Array.from(tlField)}, '*');
+}
+
+/* ========================= data loading ========================= */
+async function loadManifest(){manifest=await (await fetch('data/manifest.json')).json();
+  const es=document.getElementById('elevsel'),as=document.getElementById('azimsel');
+  manifest.elev_stops.forEach(v=>es.add(new Option(v,v)));
+  manifest.azim_stops.forEach(v=>as.add(new Option(v,v)));
+  es.value=41; as.value=31;}
+async function loadStop(elev,azim){
+  document.getElementById('loading').style.display='flex';
+  curStop={elev:+elev,azim:+azim};
+  document.getElementById('elevsel').value=elev; document.getElementById('azimsel').value=azim;
+  stopSummary=manifest.stops.find(s=>s.stop===`${elev}x${azim}`);
+  const ab=await (await fetch(`data/${elev}x${azim}.bin`)).arrayBuffer();
+  tMax=1; buildStop(ab);
+  curTime=0; document.getElementById('scrub').value=0;
+  document.getElementById('loading').style.display='none';
+  refreshCard(); postMetrics();
+}
+
+/* ========================= interaction ========================= */
+let drag=false,lx=0,ly=0;
+glc.addEventListener('pointerdown',e=>{drag=true;lx=e.clientX;ly=e.clientY;});
+addEventListener('pointerup',()=>drag=false);
+function unprojectCursor(px,py){ // px,py in CSS px -> world (x_km,z_m) on centerline plane y=12km
+  const inv=M.invert(mvp); if(!inv)return null;
+  const ndcx=px/glc.clientWidth*2-1, ndcy=1-py/glc.clientHeight*2;
+  const un=(z)=>{const x=inv[0]*ndcx+inv[4]*ndcy+inv[8]*z+inv[12],
+    y=inv[1]*ndcx+inv[5]*ndcy+inv[9]*z+inv[13],
+    zz=inv[2]*ndcx+inv[6]*ndcy+inv[10]*z+inv[14],
+    w=inv[3]*ndcx+inv[7]*ndcy+inv[11]*z+inv[15];return [x/w,y/w,zz/w];};
+  const a=un(-1),b=un(1);                                   // near/far on world ray
+  const dz=b[2]-a[2]; if(Math.abs(dz)<1e-9)return null;
+  const t=(0-a[2])/dz;                                      // intersect scene Z=0 (y=12km)
+  const sx=a[0]+t*(b[0]-a[0]), sy=a[1]+t*(b[1]-a[1]);
+  const xk=sx/S+X_MAX/2, zm=Z_MAX/2-sy/(S*VEXAG/1000);
+  if(xk<-2||xk>X_MAX+2||zm<-50||zm>Z_MAX+50)return null;
+  return {x_km:Math.max(0,Math.min(X_MAX,xk)), y_km:12, z_m:Math.max(0,Math.min(Z_MAX,zm))};}
+addEventListener('pointermove',e=>{
+  if(!drag){const w=unprojectCursor(e.clientX,e.clientY);
+    if(w)parent.postMessage({type:'cursor',panel:'reference',...w},'*');
+    else parent.postMessage({type:'cursor',panel:'reference',clear:true},'*');return;}
+  cam.yaw-=(e.clientX-lx)*0.008; cam.pitch+=(e.clientY-ly)*0.008;
+  cam.pitch=Math.max(-1.45,Math.min(1.45,cam.pitch)); lx=e.clientX;ly=e.clientY;
+  parent.postMessage({type:'camera',pose:cam},'*');});
+glc.addEventListener('wheel',e=>{e.preventDefault();
+  cam.dist=Math.max(1.2,Math.min(9,cam.dist*(1+Math.sign(e.deltaY)*0.08)));
+  parent.postMessage({type:'camera',pose:cam},'*');},{passive:false});
+document.getElementById('play').onclick=()=>{playing=!playing;
+  document.getElementById('play').textContent=playing?'❚❚ Pause':'▶ Play';};
+document.getElementById('reset').onclick=()=>{playing=false;curTime=0;
+  document.getElementById('play').textContent='▶ Play';document.getElementById('scrub').value=0;};
+document.getElementById('camreset').onclick=camDefault;
+document.getElementById('elevsel').onchange=e=>loadStop(e.target.value,curStop.azim);
+document.getElementById('azimsel').onchange=e=>loadStop(curStop.elev,e.target.value);
+document.getElementById('speed').oninput=e=>speed=+e.target.value;
+document.getElementById('scrub').oninput=e=>{playing=false;
+  document.getElementById('play').textContent='▶ Play';curTime=+e.target.value*tMax*1.25;};
+document.getElementById('volchk').onchange=e=>showVol=e.target.checked;
+document.getElementById('opac').oninput=e=>volOp=+e.target.value;
+function toggleDrawer(){document.getElementById('drawer').classList.toggle('open');}
+document.getElementById('drawer-tab').onclick=toggleDrawer;
+document.getElementById('drawer-close').onclick=toggleDrawer;
+
+/* ========================= parent messages ========================= */
+addEventListener('message',e=>{const m=e.data||{};switch(m.type){
+  case'set_camera': if(m.pose){cam.yaw=m.pose.yaw;cam.pitch=m.pose.pitch;cam.dist=m.pose.dist;}break;
+  case'set_stop': loadStop(m.elev,m.azim);break;
+  case'play': playing=true;document.getElementById('play').textContent='❚❚ Pause';break;
+  case'pause': playing=false;document.getElementById('play').textContent='▶ Play';break;
+  case'reset': playing=false;curTime=0;document.getElementById('play').textContent='▶ Play';break;
+  case'set_volume': showVol=!!m.on;document.getElementById('volchk').checked=showVol;break;
+  case'set_opacity': volOp=+m.v;document.getElementById('opac').value=volOp;break;
+  case'request_metrics': postMetrics();break;
+}});
+
+/* ========================= boot ========================= */
+(async()=>{ try{
+  await loadManifest();
+  await loadStop(41,31);
+  // drawer starts closed; dock is always visible at bottom
+  parent.postMessage({type:'ready',panel:'reference'},'*');
+  requestAnimationFrame(t=>{lastT=t;frame(t);});
+  setInterval(postMetrics,2000);
+}catch(err){document.getElementById('loading').textContent='reference error: '+err;
+  console.error(err);} })();
+</script>
+</body>
+</html>

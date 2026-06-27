@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>3D Ocean Acoustic Ray View — refraction + seabed shadow zones</title>
+<style>
+  /* iframe-safe: no top-level margins, dark background, no external fonts/CDN */
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#01040a;
+            color:#cfe6ff;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,monospace;
+            -webkit-user-select:none;user-select:none;}
+  canvas{display:block;position:absolute;top:0;left:0;}
+  #scene{z-index:1;cursor:grab;}
+  #scene:active{cursor:grabbing;}
+  .panel{position:absolute;z-index:5;background:rgba(6,14,26,0.82);border:1px solid #1c3a5e;
+         border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.45;
+         box-shadow:0 2px 14px rgba(0,0,0,0.5);backdrop-filter:blur(2px);}
+  .phead{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;}
+  .ptitle{font-size:12px;color:#eaf4ff;font-weight:600;letter-spacing:.3px;}
+  .pright{display:flex;align-items:center;gap:8px;}
+  .min{background:#143150;color:#bcd6f0;border:1px solid #2d567f;border-radius:4px;
+       font:700 12px/1 monospace;padding:2px 7px;cursor:pointer;flex:0 0 auto;}
+  .min:hover{background:#1d4a70;}
+  .panel.collapsed .body{display:none;}
+  .panel.collapsed{padding-bottom:7px;}
+  #legend{top:10px;left:10px;max-width:208px;}
+  #legend h1{font-size:12px;margin:0 0 5px;color:#eaf4ff;letter-spacing:.3px;}
+  #legend .row{display:flex;align-items:center;gap:6px;margin:2px 0;color:#a9c6e6;}
+  .sw{width:13px;height:9px;border-radius:2px;display:inline-block;flex:0 0 auto;}
+  #metrics{top:10px;right:10px;width:304px;font-size:11px;}
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:7px;}
+  .kpi{background:rgba(13,28,46,0.72);border:1px solid #173354;border-radius:7px;padding:6px 9px;min-width:0;}
+  .kpi.full{grid-column:1 / -1;}
+  .kval{font-size:17px;font-weight:700;color:#eaf6ff;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .kval.sm{font-size:13px;}
+  .klab{font-size:9px;color:#7fa6cc;text-transform:uppercase;letter-spacing:.3px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .kpi.good{border-color:#1e6e44;background:rgba(15,42,28,0.7);} .kpi.good .kval{color:#6dffa6;}
+  .kpi.bad{border-color:#7a2b2b;background:rgba(48,18,18,0.7);} .kpi.bad .kval{color:#ff8a8a;}
+  .kpi.eff{border-color:#2a5a4a;background:rgba(12,34,30,0.6);}
+  .effhdr{font-size:10px;color:#7fd8b8;letter-spacing:.6px;margin:9px 0 1px;font-weight:700;
+          border-top:1px solid #173354;padding-top:7px;}
+  #metrics h2{font-size:11px;margin:0 0 4px;color:#eaf4ff;display:flex;justify-content:space-between;}
+  #metrics .k{color:#7fa6cc;} #metrics .v{color:#dff0ff;font-weight:600;}
+  #metrics .line{display:flex;justify-content:space-between;gap:8px;margin:1px 0;}
+  #metrics .grp{border-top:1px solid #163150;margin-top:4px;padding-top:3px;}
+  #offcanon{display:none;margin-top:5px;padding:3px 6px;border-radius:5px;background:#5a1414;
+            color:#ffd2d2;border:1px solid #aa3b3b;font-weight:600;text-align:center;}
+  #offcanon.on{display:block;}
+  /* sits in the band between the bottom-left cross-section card and bottom-right
+     arrivals card so the slider row never overlaps either figure */
+  #controls{left:412px;right:212px;bottom:10px;z-index:6;display:flex;
+            flex-wrap:wrap;gap:10px 14px;align-items:center;justify-content:center;}
+  #controls button{background:#10283f;color:#dff0ff;border:1px solid #2d567f;border-radius:6px;
+            padding:5px 10px;font-size:11px;cursor:pointer;font-weight:600;}
+  #controls button:hover{background:#1a3a59;}
+  #controls button.primary{background:#13683f;border-color:#1d9c5e;}
+  #controls button.primary:hover{background:#178a52;}
+  .ctl{display:flex;flex-direction:column;gap:1px;font-size:10px;color:#8fb2d6;min-width:118px;}
+  .ctl .lab{display:flex;justify-content:space-between;}
+  .ctl input[type=range]{width:128px;accent-color:#39b0ff;height:14px;}
+  .ctl .canon{color:#5fd08a;}
+  #xsecWrap{left:10px;bottom:10px;z-index:5;padding:5px 7px 5px;}
+  /* position:relative overrides the global canvas{position:absolute} so these inset
+     canvases stay IN FLOW inside their card body (otherwise they overflow off-screen). */
+  #xsec{display:block;position:relative;border-radius:4px;margin-top:3px;}
+  #arrWrap{right:10px;bottom:10px;z-index:5;padding:5px 7px 5px;}
+  #arr{display:block;position:relative;border-radius:4px;margin-top:3px;}
+  #cbar{position:absolute;right:10px;top:150px;z-index:5;display:none;}
+  #cbar.on{display:block;}
+  #cbarCv{display:block;border:1px solid #1c3a5e;border-radius:4px;background:rgba(6,14,26,0.82);}
+  #overlay{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
+           background:rgba(2,6,14,0.78);color:#bfe0ff;font-size:15px;letter-spacing:.5px;}
+  #overlay.hidden{display:none;}
+  .toggleRow{display:flex;gap:8px;align-items:center;}
+  .chk{display:flex;align-items:center;gap:4px;font-size:10px;color:#9fc0e2;cursor:pointer;}
+  .hint{position:absolute;left:10px;top:172px;z-index:4;font-size:10px;color:#5d7ea0;max-width:200px;}
+</style>
+</head>
+<body>
+<!--
+=====================================================================================
+ ray_view.html  —  Self-contained 3D underwater acoustic ray-tracing visualisation.
+ Plain <canvas> + vanilla JS. No external library / CDN / font / network. All math in-page.
+
+ ASSUMPTIONS & STATED PARAMETERS (the scored "canonical" operating point)
+ -------------------------------------------------------------------------------------
+ DOMAIN            : x 0..50 km (range), y 0..24 km (cross-range), z 0..3000 m (depth,+down)
+ SOURCE  S         : (x=0 km,  y=12 km, z=50 m)   — emitter, inside surface layer
+ RECEIVER R        : (x=40 km, y=9 km,  z=1000 m) — fixed target (never moved)
+
+ SOUND SPEED c(z)  : 0<=z<=200 m : c=1520-0.10*z   (1520->1500, downward-refracting)
+                     z>200 m     : c=1500+0.018*(z-200)   (deep duct; min at z=200 m)
+                     c depends ONLY on z => refraction keeps a ray in its launch azimuth
+                     plane; only seabed reflection moves a ray between planes.
+
+ BATHYMETRY D(x,y) : 2500 - 1500*exp(-(((xk-18)/2.5)^2+((yk-12)/3.0)^2))
+                            - 1900*exp(-(((xk-34)/2.0)^2+((yk- 9)/2.5)^2))   [xk,yk in km]
+                     Two finite 3-D seamounts (peaks ~1000 m & ~600 m depth); 2nd is offset
+                     from the centerline so the field is asymmetric in cross-range.
+
+ LAUNCH FAN (canonical): elevation -20..+20 deg, 41 beams (1 deg step)
+                         azimuth   -15..+15 deg, 31 beams (1 deg step)  => 1271 rays.
+                         (sliders may move OFF canonical; metric card then flags it.)
+
+ RAY EQUATIONS     : Hamiltonian eikonal, arc-length s, RK4, step ds=50 m.
+                     state=(x,y,z,px,py,pz); dr/ds=c*p; dp/ds=grad(1/c)=(0,0,-c'/c^2).
+                     px,py conserved (Snell) => Snell invariant cos(theta)/c=|p_h| is
+                     exact between bounces (drift ~ machine eps validates the integrator).
+ STATIONS          : ray sampled every ARC=200 m of arc length (consistent index across
+                     rays) for paraxial ray-tube differencing and grid deposit.
+ SURFACE z=0       : pressure-release, specular flip pz->-pz, NO loss (perfect reflection).
+ SEABED z=D(x,y)   : specular reflection about the local 3-D normal n=normalize(-Dx,-Dy,1)
+                     (finite-difference gradient) => out-of-plane deflection is modelled.
+ SEABED LOSS       : canonical half-space c2=1600 m/s, rho2=1.8 g/cc, alpha=0.5 dB/lambda.
+                     Per-bounce loss = -20*log10(|R|), R = complex Rayleigh plane-wave
+                     reflection coeff with grazing-angle impedances and a complex c2
+                     (k_i/k_r = alpha*ln10/(20*2pi)) embedding the 0.5 dB/lambda attenuation.
+ TRANSMISSION LOSS : GEOMETRIC-SPREADING ONLY (ray-tube divergence). TL=10*log10(J/cos el0)
+                     + accumulated boundary loss, where J=|dr/del x dr/daz|_perp (paraxial
+                     Jacobian from neighbour rays, projected perpendicular to the ray).
+                     Reduces to spherical 20*log10(r) for straight rays (verified: TL=60.0
+                     dB at r=1 km). NO full wave/caustic corrections; intensity is CLAMPED
+                     at caustics (J floored at 1e-2, TL clamped to [0,120] dB). TL re 1 m.
+ GRID / VOXELS     : TL deposited (running minimum = strongest arrival) on the canonical
+                     comparison grid 101(x) x 49(y) x 31(z) => voxel ~500 x 500 x 100 m.
+                     This same grid is the coverage/shadow mask AND the postMessage field.
+ SHADOW CUTOFF     : a voxel is SHADOW if TL > 100 dB (or never reached => TL=inf). Chosen
+                     so the reached/insonified field stays insonified while geometric
+                     (seamount) + refractive (near-surface) shadows and deep-loss voxels
+                     read as dark. Mask computed ONCE after tracing (static, not per frame).
+ EIGENRAYS / REACH : R is "reached" if some ray passes within R_TOL=500 m (~half the
+                     inter-ray spacing at 40 km). TL(R)=incoherent multipath sum of the
+                     in-tolerance eigenray intensities. Reciprocity: re-trace from R about
+                     -x and read TL at S (residual is discretization-limited: ~halves at
+                     2x beams). Convergence: redo at 2x beams (81x61), report deltas.
+ RENDER            : own perspective projection (no 3D lib). Vertical exaggeration VEXAG=3
+                     applied to z for display only (stated on the depth axis).
+=====================================================================================
+-->
+<canvas id="scene"></canvas>
+
+<div id="legend" class="panel">
+  <div class="phead"><span class="ptitle">3D Ocean Acoustic Ray View</span><span class="pright"><button class="min">–</button></span></div>
+  <div class="body">
+  <div class="row"><span class="sw" style="background:linear-gradient(#2aa6d6,#040a18)"></span>Water (light→deep)</div>
+  <div class="row"><span class="sw" style="background:#b89a5e"></span>Seabed / seamounts</div>
+  <div class="row"><span class="sw" style="background:linear-gradient(90deg,#ff3b3b,#ffe23b,#3bff7a,#3bd4ff,#9b6bff)"></span>Rays (by launch angle)</div>
+  <div class="row"><span class="sw" style="background:#6df0ff"></span>Insonified volume</div>
+  <div class="row"><span class="sw" style="background:#0a1422;border:1px solid #20364f"></span>Shadow / unreached</div>
+  <div class="row"><span class="sw" style="background:#ffd479;border-radius:50%"></span>Source S &nbsp; <span class="sw" style="background:#5ff0ff;border-radius:50%"></span>Receiver R</div>
+  <div class="row" style="color:#8fffb0">■ eigenrays S→R highlighted</div>
+  </div>
+</div>
+
+<div id="metrics" class="panel">
+  <div class="phead"><span class="ptitle">METRICS <span id="canonTag" style="color:#5fd08a;font-weight:400">(canonical)</span></span><span class="pright"><span id="fps" class="v">– fps</span><button class="min">–</button></span></div>
+  <div class="body">
+  <div class="kpis">
+    <div class="kpi" id="k_reach"><div class="kval" id="m_reach">–</div><div class="klab">R reached</div></div>
+    <div class="kpi"><div class="kval" id="m_tlr">–</div><div class="klab">TL(R)</div></div>
+    <div class="kpi"><div class="kval" id="m_miss">–</div><div class="klab">nearest-ray miss</div></div>
+    <div class="kpi"><div class="kval sm" id="m_cov">–</div><div class="klab">insonified / shadow</div></div>
+    <div class="kpi"><div class="kval" id="m_eig">–</div><div class="klab">eigenrays · <span id="m_eigt"></span></div></div>
+    <div class="kpi"><div class="kval" id="m_recip">–</div><div class="klab">reciprocity error</div></div>
+    <div class="kpi"><div class="kval" id="m_oop">–</div><div class="klab">max |Δy| out-of-plane</div></div>
+    <div class="kpi"><div class="kval" id="m_snell">–</div><div class="klab">max Snell drift</div></div>
+    <div class="kpi full"><div class="kval sm" id="m_conv">–</div><div class="klab">convergence Δinson / ΔTL(R) @ 2× beams</div></div>
+    <div class="kpi"><div class="kval" id="m_rays">–</div><div class="klab">rays · <span id="m_raysd"></span></div></div>
+    <div class="kpi"><div class="kval sm" id="m_size">–</div><div class="klab">file size</div></div>
+  </div>
+  <div class="effhdr">EFFICIENCY <span style="color:#6f93b8;font-weight:400;letter-spacing:0">· supplied by harness</span></div>
+  <div class="kpis">
+    <div class="kpi eff"><div class="kval" id="m_cost">—</div><div class="klab">total cost (USD)</div></div>
+    <div class="kpi eff"><div class="kval" id="m_qpd">—</div><div class="klab">quality / cost · pts/$</div></div>
+    <div class="kpi full"><div class="kval sm" id="m_io">in — · out —</div><div class="klab">input / output tokens — from harness</div></div>
+  </div>
+  <div id="offcanon">⚠ OFF-CANONICAL — numbers not comparable</div>
+  </div>
+</div>
+
+<div id="cbar"><canvas id="cbarCv" width="58" height="150"></canvas></div>
+
+<div id="xsecWrap" class="panel">
+  <div class="phead"><span class="ptitle" style="font-size:10px;color:#8fb2d6;font-weight:400">Centerline cross-section (y = 12 km): refraction in x–z</span><span class="pright"><button class="min">–</button></span></div>
+  <div class="body"><canvas id="xsec" width="380" height="208"></canvas></div>
+</div>
+
+<div id="arrWrap" class="panel">
+  <div class="phead"><span class="ptitle" style="font-size:10px;color:#8fb2d6;font-weight:400">arrivals @ R (TL vs t)</span><span class="pright"><button class="min">–</button></span></div>
+  <div class="body"><canvas id="arr" width="176" height="86"></canvas></div>
+</div>
+
+<div id="controls" class="panel">
+  <button id="btnPlay" class="primary">▶ Play</button>
+  <button id="btnReset">⟲ Reset</button>
+  <button id="btnCam">Camera reset</button>
+  <button id="btnCanon">Reset to canonical</button>
+  <div class="ctl">
+    <div class="lab"><span>Elevation beams</span><span id="lblEl" class="canon">41</span></div>
+    <input id="slEl" type="range" min="9" max="81" step="2" value="41">
+  </div>
+  <div class="ctl">
+    <div class="lab"><span>Azimuth beams</span><span id="lblAz" class="canon">31</span></div>
+    <input id="slAz" type="range" min="7" max="61" step="2" value="31">
+  </div>
+  <div class="ctl">
+    <div class="lab"><span>Time scrub</span><span id="lblT">0%</span></div>
+    <input id="slTime" type="range" min="0" max="1000" step="1" value="0">
+  </div>
+  <div class="ctl">
+    <div class="lab"><span>Speed</span><span id="lblSpd">1.0×</span></div>
+    <input id="slSpd" type="range" min="10" max="400" step="5" value="100">
+  </div>
+  <div class="ctl">
+    <div class="lab"><span>Volume opacity</span><span id="lblOp">0.32</span></div>
+    <input id="slOp" type="range" min="0" max="100" step="1" value="32">
+  </div>
+  <div class="ctl">
+    <div class="toggleRow">
+      <label class="chk"><input type="checkbox" id="ckTL"> TL colormap</label>
+      <label class="chk"><input type="checkbox" id="ckVol" checked> Volume</label>
+    </div>
+    <label class="chk"><input type="checkbox" id="ckEig" checked> Eigenrays</label>
+  </div>
+</div>
+
+<div class="hint">Drag = orbit · scroll/pinch = zoom (works while playing)</div>
+<div id="overlay">Computing rays…</div>
+
+<script>
+"use strict";
+//====================================================================================
+// 0. SHORT VEC HELPERS
+//====================================================================================
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+const scl=(a,s)=>[a[0]*s,a[1]*s,a[2]*s];
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const len=a=>Math.hypot(a[0],a[1],a[2]);
+const norm=a=>{const m=len(a)||1;return [a[0]/m,a[1]/m,a[2]/m];};
+
+//====================================================================================
+// 1. ENVIRONMENT PHYSICS  (validated against node prototype)
+//====================================================================================
+function cz(z){ return z<=200 ? 1520-0.10*z : 1500+0.018*(z-200); }
+function dcz(z){ return z<200 ? -0.10 : 0.018; }
+function Dbathy(x,y){
+  const xk=x/1000, yk=y/1000;
+  const e1=Math.exp(-( ((xk-18)/2.5)**2 + ((yk-12)/3.0)**2 ));
+  const e2=Math.exp(-( ((xk-34)/2.0)**2 + ((yk- 9)/2.5)**2 ));
+  return 2500 - 1500*e1 - 1900*e2;
+}
+function seabedNormal(x,y){
+  const h=1.0;
+  const Dx=(Dbathy(x+h,y)-Dbathy(x-h,y))/(2*h);
+  const Dy=(Dbathy(x,y+h)-Dbathy(x,y-h))/(2*h);
+  return norm([-Dx,-Dy,1]);
+}
+// complex helpers for the Rayleigh bottom-reflection coefficient
+const cmul=(a,b)=>[a[0]*b[0]-a[1]*b[1],a[0]*b[1]+a[1]*b[0]];
+const cdiv=(a,b)=>{const d=b[0]*b[0]+b[1]*b[1];return [(a[0]*b[0]+a[1]*b[1])/d,(a[1]*b[0]-a[0]*b[1])/d];};
+const cabs=a=>Math.hypot(a[0],a[1]);
+const csub=(a,b)=>[a[0]-b[0],a[1]-b[1]];
+const cadd=(a,b)=>[a[0]+b[0],a[1]+b[1]];
+const csqrt=a=>{const r=Math.hypot(a[0],a[1]);const re=Math.sqrt((r+a[0])/2);let im=Math.sqrt((r-a[0])/2);if(a[1]<0)im=-im;return [re,im];};
+const RHO1=1.0, RHO2=1.8, C2R=1600, ALPHA=0.5;
+const EPS2=ALPHA*Math.LN10/(20*2*Math.PI);            // imag fraction of bottom wavenumber
+function bottomLossDB(graz, c1){
+  let s1=Math.sin(graz); if(s1<1e-4) s1=1e-4;
+  const cos1=Math.cos(graz);
+  const c2c=cdiv([C2R,0],[1,EPS2]);                   // complex bottom speed (0.5 dB/lambda)
+  const cos2=cmul(cdiv(c2c,[c1,0]),[cos1,0]);         // Snell across the interface
+  const sin2=csqrt(csub([1,0],cmul(cos2,cos2)));
+  const Z1=[RHO1*c1/s1,0];
+  const Z2=cdiv([RHO2*c2c[0],RHO2*c2c[1]],sin2);
+  const R=cdiv(csub(Z2,Z1),cadd(Z2,Z1));
+  let aR=cabs(R); if(aR>1)aR=1; if(aR<1e-6)aR=1e-6;
+  return -20*Math.log10(aR);
+}
+
+//====================================================================================
+// 2. RAY TRACER  (RK4 arc-length, refraction + surface & seabed reflection)
+//====================================================================================
+const DS=50, ARC=200, MAXARC=100000, GUARD=4000;
+const SRC=[0,12000,50], RCV=[40000,9000,1000];
+const DOM=[50000,24000,3000];
+function deriv(s){ const z=s[2],c=cz(z),dc=dcz(z); return [c*s[3],c*s[4],c*s[5],0,0,-dc/(c*c)]; }
+
+function traceRay(x0,y0,z0, el, az, axisSign){
+  axisSign=axisSign||1;
+  const c0=cz(z0);
+  const dir=[axisSign*Math.cos(el)*Math.cos(az), Math.cos(el)*Math.sin(az), Math.sin(el)];
+  let p=[dir[0]/c0,dir[1]/c0,dir[2]/c0];
+  let pos=[x0,y0,z0];
+  let s=0,t=0,bl=0,bounces=0;
+  const SX=[],SY=[],SZ=[],ST=[],SB=[];
+  let lastIdx=0, segPh=Math.hypot(p[0],p[1]), maxDrift=0;
+  const rec=()=>{SX.push(pos[0]);SY.push(pos[1]);SZ.push(pos[2]);ST.push(t);SB.push(bl);};
+  rec();
+  let guard=0;
+  while(s<MAXARC && guard++<GUARD){
+    const st=[pos[0],pos[1],pos[2],p[0],p[1],p[2]];
+    const k1=deriv(st);
+    const k2=deriv([st[0]+k1[0]*DS/2,st[1]+k1[1]*DS/2,st[2]+k1[2]*DS/2,st[3],st[4],st[5]+k1[5]*DS/2]);
+    const k3=deriv([st[0]+k2[0]*DS/2,st[1]+k2[1]*DS/2,st[2]+k2[2]*DS/2,st[3],st[4],st[5]+k2[5]*DS/2]);
+    const k4=deriv([st[0]+k3[0]*DS,st[1]+k3[1]*DS,st[2]+k3[2]*DS,st[3],st[4],st[5]+k3[5]*DS]);
+    let nx=pos[0]+DS/6*(k1[0]+2*k2[0]+2*k3[0]+k4[0]);
+    let ny=pos[1]+DS/6*(k1[1]+2*k2[1]+2*k3[1]+k4[1]);
+    let nz=pos[2]+DS/6*(k1[2]+2*k2[2]+2*k3[2]+k4[2]);
+    let npz=p[2]+DS/6*(k1[5]+2*k2[5]+2*k3[5]+k4[5]);
+    let npx=p[0], npy=p[1];
+    const cOld=cz(pos[2]);
+    // pressure-release surface (z=0): perfect specular flip, no loss
+    if(nz<0){
+      const f=pos[2]/(pos[2]-nz);
+      nx=pos[0]+f*(nx-pos[0]); ny=pos[1]+f*(ny-pos[1]); nz=0;
+      npz=-npz; bounces++; segPh=Math.hypot(npx,npy);
+    }
+    // seabed reflection about local 3-D normal (+ angle-dependent Rayleigh loss)
+    const Dn=Dbathy(nx,ny);
+    if(nz>Dn){
+      const g0=pos[2]-Dbathy(pos[0],pos[1]);
+      const g1=nz-Dn;
+      let f=g0/(g0-g1); if(!(f>=0&&f<=1))f=0.5;
+      const cx=pos[0]+f*(nx-pos[0]), cy=pos[1]+f*(ny-pos[1]), cZ=pos[2]+f*(nz-pos[2]);
+      const n=seabedNormal(cx,cy);
+      const pdotn=npx*n[0]+npy*n[1]+npz*n[2];
+      npx-=2*pdotn*n[0]; npy-=2*pdotn*n[1]; npz-=2*pdotn*n[2];
+      const pmag=Math.hypot(npx,npy,npz);
+      let sg=Math.abs(pdotn)/pmag; if(sg>1)sg=1;
+      bl+=bottomLossDB(Math.asin(sg), cz(cZ));
+      nx=cx; ny=cy; nz=cZ-1e-3; bounces++; segPh=Math.hypot(npx,npy);
+    }
+    const cAvg=0.5*(cOld+cz(nz));
+    s+=DS; t+=DS/cAvg;
+    pos=[nx,ny,nz]; p=[npx,npy,npz];
+    maxDrift=Math.max(maxDrift,Math.abs(Math.hypot(npx,npy)-segPh)); // Snell invariant drift
+    const idx=Math.floor(s/ARC);
+    if(idx>lastIdx){ rec(); lastIdx=idx; }
+    if(pos[0]>DOM[0]||pos[0]<0||pos[1]<0||pos[1]>DOM[1]||pos[2]>DOM[2]+0.01) break;
+  }
+  return {SX,SY,SZ,ST,SB,n:SX.length,el,az,maxDrift,bounces};
+}
+
+//====================================================================================
+// 3. FAN + TRANSMISSION LOSS (paraxial ray-tube Jacobian) + GRID DEPOSIT
+//====================================================================================
+const NX=101,NY=49,NZ=31, NGRID=NX*NY*NZ;
+const JFLOOR=1e-2, TLMIN=0, TLMAX=120, CUTOFF=100, RTOL=500, VEXAG=3.0;
+const EL0=-20,EL1=20,AZ0=-15,AZ1=15;
+
+function buildFan(nEl,nAz, origin, axisSign){
+  const els=[],azs=[],rays=[];
+  for(let i=0;i<nEl;i++) els.push((EL0+(EL1-EL0)*i/(nEl-1))*Math.PI/180);
+  for(let j=0;j<nAz;j++) azs.push((AZ0+(AZ1-AZ0)*j/(nAz-1))*Math.PI/180);
+  for(let i=0;i<nEl;i++)for(let j=0;j<nAz;j++) rays.push(traceRay(origin[0],origin[1],origin[2],els[i],azs[j],axisSign));
+  return {rays,nEl,nAz,els,azs};
+}
+function computeTL(fan){
+  const {rays,nEl,nAz}=fan, tl=[];
+  const dEl=((EL1-EL0)/(nEl-1))*Math.PI/180, dAz=((AZ1-AZ0)/(nAz-1))*Math.PI/180;
+  const P=(r,k)=>[rays[r].SX[k],rays[r].SY[k],rays[r].SZ[k]];
+  const has=(r,k)=>k<rays[r].n;
+  for(let i=0;i<nEl;i++)for(let j=0;j<nAz;j++){
+    const r=i*nAz+j, R=rays[r], arr=new Float32Array(R.n), cosel=Math.max(0.2,Math.cos(R.el));
+    let lastJ=1;
+    const iU=Math.min(nEl-1,i+1), iD=Math.max(0,i-1);
+    const jU=Math.min(nAz-1,j+1), jD=Math.max(0,j-1);
+    for(let k=0;k<R.n;k++){
+      let De=null,Da=null;
+      if(iU!==iD&&has(iU*nAz+j,k)&&has(iD*nAz+j,k)){
+        const a=P(iU*nAz+j,k),b=P(iD*nAz+j,k),h=(iU-iD)*dEl;
+        De=[(a[0]-b[0])/h,(a[1]-b[1])/h,(a[2]-b[2])/h];
+      }
+      if(jU!==jD&&has(i*nAz+jU,k)&&has(i*nAz+jD,k)){
+        const a=P(i*nAz+jU,k),b=P(i*nAz+jD,k),h=(jU-jD)*dAz;
+        Da=[(a[0]-b[0])/h,(a[1]-b[1])/h,(a[2]-b[2])/h];
+      }
+      let J;
+      if(De&&Da){
+        let u = k+1<R.n ? [R.SX[k+1]-R.SX[k],R.SY[k+1]-R.SY[k],R.SZ[k+1]-R.SZ[k]]
+              : k>0    ? [R.SX[k]-R.SX[k-1],R.SY[k]-R.SY[k-1],R.SZ[k]-R.SZ[k-1]] : [1,0,0];
+        u=norm(u);
+        const Dep=sub(De,scl(u,dot(De,u))), Dap=sub(Da,scl(u,dot(Da,u)));
+        J=len(cross(Dep,Dap)); lastJ=J;
+      } else J=lastJ;
+      if(J<JFLOOR)J=JFLOOR;
+      let TL=10*Math.log10(J/cosel)+R.SB[k];
+      if(TL<TLMIN)TL=TLMIN; if(TL>TLMAX)TL=TLMAX;
+      arr[k]=TL;
+    }
+    tl.push(arr);
+  }
+  return tl;
+}
+function newGrid(){const g=new Float32Array(NGRID);g.fill(999);return g;}
+function depositFan(grid,fan,tl){
+  const {rays}=fan;
+  for(let r=0;r<rays.length;r++){
+    const R=rays[r],T=tl[r];
+    for(let k=0;k<R.n-1;k++){
+      const x0=R.SX[k],y0=R.SY[k],z0=R.SZ[k],t0=T[k];
+      const dx=R.SX[k+1]-x0,dy=R.SY[k+1]-y0,dz=R.SZ[k+1]-z0,dt=T[k+1]-t0;
+      const steps=Math.max(1,Math.ceil(Math.hypot(dx,dy,dz)/80));
+      for(let m=0;m<=steps;m++){
+        const f=m/steps;
+        const ix=Math.round((x0+dx*f)/DOM[0]*(NX-1));
+        const iy=Math.round((y0+dy*f)/DOM[1]*(NY-1));
+        const iz=Math.round((z0+dz*f)/DOM[2]*(NZ-1));
+        if(ix<0||ix>=NX||iy<0||iy>=NY||iz<0||iz>=NZ)continue;
+        const idx=ix+NX*(iy+NY*iz), v=t0+dt*f;
+        if(v<grid[idx])grid[idx]=v;
+      }
+    }
+  }
+}
+function sampleGrid(grid,x,y,z){
+  const gx=x/DOM[0]*(NX-1),gy=y/DOM[1]*(NY-1),gz=z/DOM[2]*(NZ-1);
+  const x0=Math.max(0,Math.min(NX-2,Math.floor(gx))),y0=Math.max(0,Math.min(NY-2,Math.floor(gy))),z0=Math.max(0,Math.min(NZ-2,Math.floor(gz)));
+  const fx=gx-x0,fy=gy-y0,fz=gz-z0, g=(a,b,c)=>grid[a+NX*(b+NY*c)];
+  return g(x0,y0,z0)*(1-fx)*(1-fy)*(1-fz)+g(x0+1,y0,z0)*fx*(1-fy)*(1-fz)
+        +g(x0,y0+1,z0)*(1-fx)*fy*(1-fz)+g(x0,y0,z0+1)*(1-fx)*(1-fy)*fz
+        +g(x0+1,y0+1,z0)*fx*fy*(1-fz)+g(x0+1,y0,z0+1)*fx*(1-fy)*fz
+        +g(x0,y0+1,z0+1)*(1-fx)*fy*fz+g(x0+1,y0+1,z0+1)*fx*fy*fz;
+}
+function coverage(grid){let ins=0;for(let i=0;i<grid.length;i++)if(grid[i]<=CUTOFF)ins++;return ins/grid.length;}
+function analyzeReceiver(fan,tl,target){
+  const {rays}=fan; let bestMiss=1e9,eigen=[];
+  for(let r=0;r<rays.length;r++){
+    const R=rays[r],T=tl[r]; let mind=1e9,mk=0;
+    for(let k=0;k<R.n-1;k++){
+      const ax=R.SX[k],ay=R.SY[k],az=R.SZ[k];
+      const dx=R.SX[k+1]-ax,dy=R.SY[k+1]-ay,dz=R.SZ[k+1]-az;
+      const L2=dx*dx+dy*dy+dz*dz||1;
+      let u=((target[0]-ax)*dx+(target[1]-ay)*dy+(target[2]-az)*dz)/L2; u=Math.max(0,Math.min(1,u));
+      const d=Math.hypot(ax+dx*u-target[0],ay+dy*u-target[1],az+dz*u-target[2]);
+      if(d<mind){mind=d;mk=k;}
+    }
+    if(mind<bestMiss)bestMiss=mind;
+    if(mind<=RTOL) eigen.push({r,miss:mind,t:R.ST[mk],tl:T[mk],el:R.el,az:R.az});
+  }
+  eigen.sort((a,b)=>a.t-b.t);
+  let Isum=0; for(const e of eigen) Isum+=Math.pow(10,-e.tl/10);
+  const tlSum = Isum>0 ? -10*Math.log10(Isum) : 999;
+  return {bestMiss,eigen,tlSum,reached:bestMiss<=RTOL};
+}
+
+//====================================================================================
+// 4. FULL PRECOMPUTE  (one-shot; not per frame)
+//====================================================================================
+let STATE=null;       // current scene state (canonical or off-canonical)
+function precompute(nEl,nAz){
+  const t0=performance.now();
+  const fan=buildFan(nEl,nAz,SRC,1);
+  const tl=computeTL(fan);
+  const grid=newGrid(); depositFan(grid,fan,tl);
+  const rec=analyzeReceiver(fan,tl,RCV);
+  const tlR = rec.reached ? rec.tlSum : sampleGrid(grid,RCV[0],RCV[1],RCV[2]);
+
+  // out-of-plane deflection + Snell-invariant drift over all rays
+  let maxOOP=0,maxDrift=0;
+  for(const R of fan.rays){
+    const nx=-Math.sin(R.az), ny=Math.cos(R.az);
+    for(let k=0;k<R.n;k++){ const oop=Math.abs((R.SX[k]-SRC[0])*nx+(R.SY[k]-SRC[1])*ny); if(oop>maxOOP)maxOOP=oop; }
+    if(R.maxDrift>maxDrift)maxDrift=R.maxDrift;
+  }
+  // reciprocity: trace from R about -x, read TL at S
+  const fanR=buildFan(nEl,nAz,RCV,-1);
+  const tlRv=computeTL(fanR);
+  const recRev=analyzeReceiver(fanR,tlRv,SRC);
+  const gridR=newGrid(); depositFan(gridR,fanR,tlRv);
+  const tlS = recRev.reached ? recRev.tlSum : sampleGrid(gridR,SRC[0],SRC[1],SRC[2]);
+  const recipErr=Math.abs(tlR-tlS);
+
+  const insFrac=coverage(grid);
+
+  // convergence at 2x beams — defined at canonical only
+  const isCanon=(nEl===41&&nAz===31);
+  let convIns=null,convTL=null;
+  if(isCanon){
+    const f2=buildFan(2*nEl-1,2*nAz-1,SRC,1);
+    const t2=computeTL(f2);
+    const g2=newGrid(); depositFan(g2,f2,t2);
+    const r2=analyzeReceiver(f2,t2,RCV);
+    const tlR2=r2.reached?r2.tlSum:sampleGrid(g2,RCV[0],RCV[1],RCV[2]);
+    convIns=Math.abs(coverage(g2)-insFrac)*100;
+    convTL=Math.abs(tlR2-tlR);
+  }
+
+  // build decimated render polylines (<= MAXRP points) coloured by launch-angle
+  const MAXRP=70;
+  const polys=fan.rays.map((R,idx)=>{
+    const i=Math.floor(idx/nAz);
+    const stride=Math.max(1,Math.ceil(R.n/MAXRP));
+    const X=[],Y=[],Z=[],T=[];
+    for(let k=0;k<R.n;k+=stride){X.push(R.SX[k]);Y.push(R.SY[k]);Z.push(R.SZ[k]);T.push(R.ST[k]);}
+    const lastk=R.n-1; if(lastk%stride!==0){X.push(R.SX[lastk]);Y.push(R.SY[lastk]);Z.push(R.SZ[lastk]);T.push(R.ST[lastk]);}
+    const hue=(EL1-(R.el*180/Math.PI))/(EL1-EL0)*280;  // +20deg->0(red) .. -20deg->280(violet)
+    return {X,Y,Z,T,el:i,n:X.length,col:`hsl(${hue},90%,60%)`};
+  });
+  // eigenray set (decimated polylines for highlight; carry travel time so they
+  // advance WITH the wavefront and vanish on Reset = pre-emission state)
+  const eigPolys=rec.eigen.map(e=>{
+    const R=fan.rays[e.r], st=Math.max(1,Math.ceil(R.n/120)), X=[],Y=[],Z=[],T=[];
+    for(let k=0;k<R.n;k+=st){X.push(R.SX[k]);Y.push(R.SY[k]);Z.push(R.SZ[k]);T.push(R.ST[k]);}
+    return {X,Y,Z,T,n:X.length};
+  });
+
+  // insonified voxel point cloud (for volume glow / TL colormap)
+  const vox=[];
+  for(let iz=0;iz<NZ;iz++)for(let iy=0;iy<NY;iy++)for(let ix=0;ix<NX;ix++){
+    const v=grid[ix+NX*(iy+NY*iz)];
+    if(v<=CUTOFF) vox.push(ix/(NX-1)*DOM[0], iy/(NY-1)*DOM[1], iz/(NZ-1)*DOM[2], v);
+  }
+  const voxArr=new Float32Array(vox);
+
+  let Tmax=0; for(const R of fan.rays) if(R.ST[R.n-1]>Tmax)Tmax=R.ST[R.n-1];
+
+  return {fan,tl,grid,gridFloat:grid, rec,tlR,maxOOP,maxDrift,insFrac,recipErr,
+          convIns,convTL,isCanon,nEl,nAz,polys,eigPolys,voxArr,Tmax,calcMs:performance.now()-t0};
+}
+
+//====================================================================================
+// 5. METRICS CARD + postMessage
+//====================================================================================
+// EFFICIENCY is owned by the HARNESS: it bills each run and computes the TL-RMSE score,
+// then posts {type:'ray_score', score, costUSD, inputTokens, outputTokens} to this iframe.
+// The panel asserts NOTHING about its own cost — it only displays what the harness sends,
+// so the three panels are measured on one identical basis. Standalone => tiles stay "—".
+const fmtTok=n=>!isFinite(n)?'—':n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(n);
+window.addEventListener('message',ev=>{
+  const d=ev.data; if(!d||d.type!=='ray_score')return;
+  if(isFinite(d.costUSD)) document.getElementById('m_cost').textContent='$'+Number(d.costUSD).toFixed(2);
+  if(isFinite(d.score)&&isFinite(d.costUSD)) document.getElementById('m_qpd').textContent=(d.score/d.costUSD).toFixed(2)+' pts/$';
+  else if(isFinite(d.score)) document.getElementById('m_qpd').textContent=Number(d.score).toFixed(0)+' pts';
+  if(isFinite(d.inputTokens)||isFinite(d.outputTokens))
+    document.getElementById('m_io').textContent='in '+fmtTok(d.inputTokens)+' · out '+fmtTok(d.outputTokens);
+});
+function fmt(x,d){return (x>=999?'∞':x.toFixed(d));}
+function pushMetrics(S){
+  const off=!S.isCanon;
+  document.getElementById('offcanon').className = off?'on':'';
+  document.getElementById('canonTag').textContent = off?'(off-canonical)':'(canonical)';
+  document.getElementById('canonTag').style.color = off?'#ff9b9b':'#5fd08a';
+  document.getElementById('m_reach').textContent = S.rec.reached?'YES':'NO';
+  document.getElementById('k_reach').className = 'kpi '+(S.rec.reached?'good':'bad');
+  document.getElementById('m_miss').textContent = fmt(S.rec.bestMiss,0)+' m';
+  document.getElementById('m_tlr').textContent = fmt(S.tlR,1)+' dB';
+  document.getElementById('m_cov').textContent = (S.insFrac*100).toFixed(1)+' / '+((1-S.insFrac)*100).toFixed(1)+'%';
+  document.getElementById('m_oop').textContent = (S.maxOOP/1000).toFixed(2)+' km';
+  document.getElementById('m_snell').textContent = S.maxDrift.toExponential(1);
+  document.getElementById('m_eig').textContent = S.rec.eigen.length;
+  document.getElementById('m_eigt').textContent = S.rec.eigen.length?(S.rec.eigen[0].t.toFixed(2)+'–'+S.rec.eigen[S.rec.eigen.length-1].t.toFixed(2)+'s'):'none';
+  document.getElementById('m_recip').textContent = fmt(S.recipErr,2)+' dB';
+  document.getElementById('m_conv').textContent = S.isCanon ? (S.convIns.toFixed(1)+'% / '+S.convTL.toFixed(2)+' dB') : '— (off-canonical)';
+  document.getElementById('m_rays').textContent = (S.nEl*S.nAz);
+  document.getElementById('m_raysd').textContent = S.nEl+'×'+S.nAz;
+  const kb=(document.documentElement.outerHTML.length/1024);
+  document.getElementById('m_size').textContent = '~'+kb.toFixed(0)+' KB';
+
+  try{
+    window.parent.postMessage({
+      type:'ray_metrics',
+      canonical:S.isCanon,
+      reached:S.rec.reached, missDistanceM:S.rec.bestMiss, TL_R_dB:S.tlR,
+      insonifiedFraction:S.insFrac, shadowFraction:1-S.insFrac,
+      maxOutOfPlaneDeflM:S.maxOOP, maxSnellDriftPerM:S.maxDrift,
+      eigenrayCount:S.rec.eigen.length,
+      eigenrays:S.rec.eigen.map(e=>({tt_s:e.t, TL_dB:e.tl, el_deg:e.el*180/Math.PI, az_deg:e.az*180/Math.PI})),
+      reciprocityErrorDB:S.recipErr,
+      convergence:{dInsonifiedPct:S.convIns, dTL_R_dB:S.convTL},
+      rayCount:{elevation:S.nEl, azimuth:S.nAz, total:S.nEl*S.nAz},
+      fps:lastFps, fileSizeKB:kb,
+      shadowCutoffDB:CUTOFF, eigenrayToleranceM:RTOL,
+      tlGrid:{nx:NX, ny:NY, nz:NZ, order:'x-fastest', dB:S.gridFloat}
+    },'*');
+  }catch(e){}
+}
+
+//====================================================================================
+// 6. CAMERA + PERSPECTIVE PROJECTION  (own, no 3D library)
+//====================================================================================
+const scene=document.getElementById('scene'), ctx=scene.getContext('2d');
+let W=0,H=0,DPR=Math.min(2,window.devicePixelRatio||1);
+function toScene(x,y,z){ return [x/1000, y/1000, z/1000*VEXAG]; }   // km, km, km*exagg
+const CENTER=[DOM[0]/2000, DOM[1]/2000, DOM[2]/2000*VEXAG];
+let cam={yaw:0.7692, pitch:0.456, dist:70, fov:50*Math.PI/180};
+let basis=null;
+function buildCamera(){
+  const cp=[
+    CENTER[0]+cam.dist*Math.cos(cam.pitch)*Math.cos(cam.yaw),
+    CENTER[1]+cam.dist*Math.cos(cam.pitch)*Math.sin(cam.yaw),
+    CENTER[2]-cam.dist*Math.sin(cam.pitch)
+  ];
+  const fwd=norm(sub(CENTER,cp));
+  let right=cross(fwd,[0,0,-1]); if(len(right)<1e-6)right=[1,0,0]; right=norm(right);
+  const up=norm(cross(right,fwd));
+  basis={cp,fwd,right,up,focal:0.5*H/Math.tan(cam.fov/2),ox:0,oy:0};
+  // auto-center: shift the projected domain-box centroid to the viewport middle
+  let sx=0,sy=0,nv=0;
+  const cs=[[0,0,0],[DOM[0],0,0],[DOM[0],DOM[1],0],[0,DOM[1],0],[0,0,DOM[2]],[DOM[0],0,DOM[2]],[DOM[0],DOM[1],DOM[2]],[0,DOM[1],DOM[2]]];
+  for(const c of cs){const p=pw(c[0],c[1],c[2]); if(p.vis){sx+=p.x;sy+=p.y;nv++;}}
+  if(nv){ basis.ox=W/2-sx/nv; basis.oy=H/2-sy/nv; }
+}
+function project(P){
+  const v=sub(P,basis.cp);
+  const cz_=dot(v,basis.fwd);
+  if(cz_<=0.05) return {x:0,y:0,depth:cz_,vis:false};
+  return {x:W/2+basis.focal*dot(v,basis.right)/cz_+basis.ox, y:H/2-basis.focal*dot(v,basis.up)/cz_+basis.oy, depth:cz_, vis:true};
+}
+const pw=(x,y,z)=>project(toScene(x,y,z));     // project world (metres)
+
+//====================================================================================
+// 7. STATIC SCENE LAYER  (background, box, water, seabed, volume) — cached offscreen
+//====================================================================================
+const off=document.createElement('canvas'); const octx=off.getContext('2d');
+const volCv=document.createElement('canvas'); const volCtx=volCv.getContext('2d'); // volume scratch (blurred for a smooth glow)
+// wavefront-tip layer: soft glow sprites are accumulated here and faded each frame,
+// so the advancing rays leave a short comet trail instead of hard white squares.
+const trailCv=document.createElement('canvas'); const trailCtx=trailCv.getContext('2d');
+let trailDirty=true;
+const tipSprite=document.createElement('canvas'); tipSprite.width=tipSprite.height=32;
+{ const s=tipSprite.getContext('2d'), g=s.createRadialGradient(16,16,0,16,16,16);
+  g.addColorStop(0,'rgba(150,235,255,0.16)'); g.addColorStop(0.4,'rgba(110,205,255,0.05)');
+  g.addColorStop(1,'rgba(110,205,255,0)'); s.fillStyle=g; s.fillRect(0,0,32,32); }
+let camDirty=true;
+function colormapTL(tl){ // low TL (loud)=warm, high TL (quiet)=cool
+  const t=Math.max(0,Math.min(1,(tl-45)/(CUTOFF-45)));
+  const r=Math.round(255*Math.max(0,Math.min(1,1.5-Math.abs(t-0.12)*3.0)));
+  const g=Math.round(255*Math.max(0,Math.min(1,1.25-Math.abs(t-0.5)*2.6)));
+  const b=Math.round(255*Math.max(0,Math.min(1,0.2+(t-0.55)*2.2)));
+  return [r,g,b];
+}
+function seabedColor(nz,rim){
+  const lz=Math.max(0.15,nz);
+  const r=Math.min(255,Math.round(80+84*lz+46*rim)), g=Math.min(255,Math.round(72+76*lz+38*rim)), b=Math.min(255,Math.round(46+40*lz+24*rim));
+  return `rgb(${r},${g},${b})`;
+}
+function drawBoxEdge(c,a,b,style,wdt){
+  const A=pw(a[0],a[1],a[2]), B=pw(b[0],b[1],b[2]);
+  if(!A.vis||!B.vis)return;
+  c.strokeStyle=style;c.lineWidth=wdt;c.beginPath();c.moveTo(A.x,A.y);c.lineTo(B.x,B.y);c.stroke();
+}
+function renderStatic(){
+  const c=octx;
+  c.setTransform(DPR,0,0,DPR,0,0);
+  c.clearRect(0,0,W,H);
+  const bg=c.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,'#0a2740'); bg.addColorStop(0.5,'#041527'); bg.addColorStop(1,'#01060e');
+  c.fillStyle=bg; c.fillRect(0,0,W,H);
+
+  buildCamera();
+  const X0=0,X1=DOM[0],Y0=0,Y1=DOM[1],Z0=0,Z1=DOM[2];
+  // water side-walls as depth-graded translucent quads (light cyan top -> navy bottom)
+  const walls=[
+    [[X0,Y0,Z0],[X1,Y0,Z0],[X1,Y0,Z1],[X0,Y0,Z1]],
+    [[X0,Y1,Z0],[X1,Y1,Z0],[X1,Y1,Z1],[X0,Y1,Z1]],
+    [[X0,Y0,Z0],[X0,Y1,Z0],[X0,Y1,Z1],[X0,Y0,Z1]],
+    [[X1,Y0,Z0],[X1,Y1,Z0],[X1,Y1,Z1],[X1,Y0,Z1]]
+  ];
+  const wallDepth=walls.map(q=>{let s=0;for(const v of q)s+=pw(v[0],v[1],v[2]).depth;return s/4;});
+  for(const wi of [0,1,2,3].sort((a,b)=>wallDepth[b]-wallDepth[a])){
+    const q=walls[wi], P=q.map(v=>pw(v[0],v[1],v[2])); if(P.some(p=>!p.vis))continue;
+    const g=c.createLinearGradient(0,(P[0].y+P[1].y)/2,0,(P[2].y+P[3].y)/2);
+    g.addColorStop(0,'rgba(46,150,196,0.16)'); g.addColorStop(1,'rgba(4,12,28,0.16)');
+    c.fillStyle=g; c.beginPath(); c.moveTo(P[0].x,P[0].y);
+    for(let i=1;i<4;i++)c.lineTo(P[i].x,P[i].y); c.closePath(); c.fill();
+  }
+  const corners=[[X0,Y0,Z0],[X1,Y0,Z0],[X1,Y1,Z0],[X0,Y1,Z0],[X0,Y0,Z1],[X1,Y0,Z1],[X1,Y1,Z1],[X0,Y1,Z1]];
+  const E=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+  for(const e of E) drawBoxEdge(c,corners[e[0]],corners[e[1]],'rgba(90,140,180,0.30)',1);
+
+  // SEABED surface mesh (two seamounts), shaded + rim-lit, painter-sorted
+  const MX=84,MY=42, light=norm([-0.4,-0.5,-0.75]);
+  const quads=[];
+  for(let i=0;i<MX;i++)for(let j=0;j<MY;j++){
+    const x0=i/MX*DOM[0], x1=(i+1)/MX*DOM[0], y0=j/MY*DOM[1], y1=(j+1)/MY*DOM[1];
+    const v=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]].map(p=>[p[0],p[1],Dbathy(p[0],p[1])]);
+    const n=seabedNormal((x0+x1)/2,(y0+y1)/2);
+    const pr=v.map(p=>pw(p[0],p[1],p[2])); if(pr.some(p=>!p.vis))continue;
+    const depth=(pr[0].depth+pr[1].depth+pr[2].depth+pr[3].depth)/4;
+    const shade=Math.max(0,dot(n,scl(light,-1)));
+    const viewv=norm(sub(basis.cp,toScene((x0+x1)/2,(y0+y1)/2,(v[0][2]+v[2][2])/2)));
+    const rim=Math.pow(1-Math.max(0,Math.abs(dot(n,viewv))),2.2)*0.6;
+    quads.push({pr,depth,col:seabedColor(shade,rim)});
+  }
+  quads.sort((a,b)=>b.depth-a.depth);
+  for(const q of quads){
+    c.fillStyle=q.col; c.strokeStyle=q.col; c.lineWidth=0.6;
+    c.beginPath(); c.moveTo(q.pr[0].x,q.pr[0].y);
+    for(let i=1;i<4;i++)c.lineTo(q.pr[i].x,q.pr[i].y); c.closePath(); c.fill(); c.stroke();
+  }
+  labelAt(c, 18000, 12000, Dbathy(18000,12000)-40, 'seamount 1', '#f0d9a8');
+  labelAt(c, 34000, 9000, Dbathy(34000,9000)-40, 'seamount 2', '#f0d9a8');
+  labelAt(c, 47000, 2200, Dbathy(47000,2200), 'seabed', '#d9c089');
+
+  // INSONIFIED VOLUME — drawn to a scratch layer as overlapping additive splats
+  // then blurred on composite, so the coarse voxel grid reads as a smooth glowing
+  // medium instead of hard pixel squares. (Only re-done on camera/opacity change.)
+  if(showVol && STATE){
+    const vx=STATE.voxArr, op=volOpacity;
+    volCtx.setTransform(DPR,0,0,DPR,0,0);
+    volCtx.clearRect(0,0,W,H);
+    volCtx.globalCompositeOperation='lighter';
+    for(let i=0;i<vx.length;i+=4){
+      const p=pw(vx[i],vx[i+1],vx[i+2]); if(!p.vis)continue;
+      const sz=Math.max(2.6, 540/p.depth);          // overlapping splats so they merge
+      let col;
+      if(tlColormap){const rgb=colormapTL(vx[i+3]); col=`rgba(${rgb[0]},${rgb[1]},${rgb[2]},${0.055*op})`;}
+      else col=`rgba(92,166,206,${0.05*op})`;        // muted soft blue — gentle on the eyes
+      volCtx.fillStyle=col; volCtx.fillRect(p.x-sz/2,p.y-sz/2,sz,sz);
+    }
+    volCtx.globalCompositeOperation='source-over';
+    c.save();
+    c.globalCompositeOperation='screen';             // softer than additive: eases toward white
+    c.filter='blur(4px)';                            // smooths the voxel blocks into a cloud
+    c.drawImage(volCv,0,0,W,H);
+    c.filter='none'; c.restore();
+  }
+
+  // faint water-surface plane z=0
+  const sp=[[X0,Y0,0],[X1,Y0,0],[X1,Y1,0],[X0,Y1,0]].map(v=>pw(v[0],v[1],v[2]));
+  if(sp.every(p=>p.vis)){
+    c.fillStyle='rgba(80,180,220,0.07)'; c.strokeStyle='rgba(120,200,235,0.30)'; c.lineWidth=1;
+    c.beginPath(); c.moveTo(sp[0].x,sp[0].y); for(let i=1;i<4;i++)c.lineTo(sp[i].x,sp[i].y); c.closePath(); c.fill(); c.stroke();
+    labelAt(c, 3500, 1500, 0, 'surface (z=0)', '#9fe0ff');
+  }
+  for(const e of E) drawBoxEdge(c,corners[e[0]],corners[e[1]],'rgba(150,195,235,0.55)',1.1);
+  drawAxes(c);
+}
+function labelAt(c,x,y,z,txt,col){
+  const p=pw(x,y,z); if(!p.vis)return;
+  c.font='10px monospace'; c.fillStyle=col; c.textAlign='center';
+  c.fillText(txt,p.x,p.y); c.textAlign='left';
+}
+function drawAxes(c){
+  c.font='10px monospace'; c.fillStyle='#9fc4e6'; c.textAlign='center';
+  for(let xk=0;xk<=50;xk+=10){ const p=pw(xk*1000,0,DOM[2]); if(p.vis){c.fillRect(p.x-1,p.y-1,2,2); c.fillText(xk+'',p.x,p.y+12);} }
+  let pm=pw(25000,0,DOM[2]); if(pm.vis)c.fillText('range x (km)',pm.x,pm.y+24);
+  for(let yk=0;yk<=24;yk+=6){ const p=pw(0,yk*1000,DOM[2]); if(p.vis){c.fillRect(p.x-1,p.y-1,2,2); c.fillText(yk+'',p.x-14,p.y+4);} }
+  pm=pw(0,12000,DOM[2]); if(pm.vis)c.fillText('cross-range y (km)',pm.x-30,pm.y-8);
+  c.textAlign='right';
+  for(let zk=0;zk<=3000;zk+=1000){ const p=pw(0,0,zk); if(p.vis){c.fillRect(p.x-1,p.y-1,2,2); c.fillText(zk+'',p.x-6,p.y+3);} }
+  pm=pw(0,0,1500); if(pm.vis){c.fillText('depth z (m, ×'+VEXAG+' exagg.)',pm.x-6,pm.y-6);}
+  c.textAlign='left';
+}
+
+//====================================================================================
+// 8. DYNAMIC LAYER  (rays advancing by travel-time, wavefront, S & R)
+//====================================================================================
+let projCacheDirty=true;
+function projectPolys(){
+  if(!STATE)return;
+  for(const P of STATE.polys){
+    P.sx=new Float32Array(P.n); P.sy=new Float32Array(P.n); P.vis=new Uint8Array(P.n);
+    for(let k=0;k<P.n;k++){ const p=pw(P.X[k],P.Y[k],P.Z[k]); P.sx[k]=p.x; P.sy[k]=p.y; P.vis[k]=p.vis?1:0; }
+  }
+  for(const Eg of STATE.eigPolys){
+    Eg.sx=new Float32Array(Eg.n); Eg.sy=new Float32Array(Eg.n); Eg.vis=new Uint8Array(Eg.n);
+    for(let k=0;k<Eg.n;k++){ const p=pw(Eg.X[k],Eg.Y[k],Eg.Z[k]); Eg.sx[k]=p.x; Eg.sy[k]=p.y; Eg.vis[k]=p.vis?1:0; }
+  }
+  projCacheDirty=false;
+}
+function renderDynamic(Tfront){
+  if(!STATE)return;
+  if(projCacheDirty)projectPolys();
+  const groups={};
+  for(const P of STATE.polys){
+    if(!groups[P.el]){groups[P.el]=new Path2D(); groups[P.el]._col=P.col;}
+    const path=groups[P.el]; let pen=false, lastK=-1;
+    for(let k=0;k<P.n;k++){
+      if(P.T[k]>Tfront) break;                 // travel time is monotonic along the ray
+      if(!P.vis[k]){pen=false;lastK=k;continue;}
+      if(!pen){path.moveTo(P.sx[k],P.sy[k]);pen=true;} else path.lineTo(P.sx[k],P.sy[k]);
+      lastK=k;
+    }
+    // SMOOTH advancing tip: interpolate position at exactly Tfront between stations,
+    // so the wavefront slides continuously instead of snapping station-to-station.
+    P._tip=0;
+    if(lastK>=0 && lastK+1<P.n && P.vis[lastK] && P.vis[lastK+1]){
+      const t0=P.T[lastK], t1=P.T[lastK+1], f=(t1>t0)?(Tfront-t0)/(t1-t0):0;
+      const tx=P.sx[lastK]+(P.sx[lastK+1]-P.sx[lastK])*f, ty=P.sy[lastK]+(P.sy[lastK+1]-P.sy[lastK])*f;
+      if(pen)path.lineTo(tx,ty);
+      P._tipx=tx; P._tipy=ty; P._tip=1;
+    }
+  }
+  ctx.lineWidth=1; ctx.lineJoin='round'; ctx.globalAlpha=0.82;
+  for(const k in groups){ ctx.strokeStyle=groups[k]._col; ctx.stroke(groups[k]); }
+  ctx.globalAlpha=1;
+  if(showEig){
+    ctx.strokeStyle='rgba(150,255,180,0.95)'; ctx.lineWidth=2; ctx.lineJoin='round';
+    for(const Eg of STATE.eigPolys){
+      ctx.beginPath(); let pen=false, lastK=-1;
+      for(let k=0;k<Eg.n;k++){ if(Eg.T[k]>Tfront)break; if(!Eg.vis[k]){pen=false;lastK=k;continue;}
+        if(!pen){ctx.moveTo(Eg.sx[k],Eg.sy[k]);pen=true;} else ctx.lineTo(Eg.sx[k],Eg.sy[k]); lastK=k; }
+      if(pen && lastK+1<Eg.n && Eg.vis[lastK+1]){
+        const t0=Eg.T[lastK], t1=Eg.T[lastK+1], f=(t1>t0)?(Tfront-t0)/(t1-t0):0;
+        ctx.lineTo(Eg.sx[lastK]+(Eg.sx[lastK+1]-Eg.sx[lastK])*f, Eg.sy[lastK]+(Eg.sy[lastK+1]-Eg.sy[lastK])*f);
+      }
+      ctx.stroke();
+    }
+  }
+  // wavefront = the continuously-interpolated tips of every ray at exactly Tfront.
+  // Soft glow sprites are stamped onto a persistent buffer that fades a little each
+  // frame, so moving tips smear into a short comet trail; then composited additively.
+  if(trailDirty){
+    trailCtx.setTransform(1,0,0,1,0,0); trailCtx.clearRect(0,0,trailCv.width,trailCv.height); trailDirty=false;
+  }else{
+    trailCtx.globalCompositeOperation='destination-out'; trailCtx.setTransform(1,0,0,1,0,0);
+    trailCtx.fillStyle='rgba(0,0,0,0.16)'; trailCtx.fillRect(0,0,trailCv.width,trailCv.height);
+  }
+  // source-over (NOT additive) so densely-clustered tips near the source clamp to a
+  // soft translucent cyan instead of saturating into an ugly solid white blob.
+  trailCtx.globalCompositeOperation='source-over'; trailCtx.setTransform(DPR,0,0,DPR,0,0);
+  const tipR=2.8;
+  for(const P of STATE.polys){ if(P._tip) trailCtx.drawImage(tipSprite,P._tipx-tipR,P._tipy-tipR,tipR*2,tipR*2); }
+  ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=0.3; ctx.setTransform(1,0,0,1,0,0);
+  ctx.drawImage(trailCv,0,0); ctx.setTransform(DPR,0,0,DPR,0,0); ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
+  drawNode(SRC,'#ffd479','S', false);
+  drawNode(RCV,'#5ff0ff','R', true);
+  // faint camera read-out (orbit angles + zoom) inside the frame, top-centre
+  const yawDeg=((cam.yaw*180/Math.PI)%360+540)%360-180;
+  ctx.font='11px monospace'; ctx.fillStyle='rgba(150,185,215,0.30)'; ctx.textAlign='center';
+  ctx.fillText('cam  yaw '+yawDeg.toFixed(0)+'°  ·  pitch '+(cam.pitch*180/Math.PI).toFixed(0)+'°  ·  zoom '+(74/cam.dist).toFixed(2)+'×', W/2, 22);
+  ctx.textAlign='left';
+}
+function drawNode(W3,col,label,isR){
+  const p=pw(W3[0],W3[1],W3[2]); if(!p.vis)return;
+  const rr=Math.max(4,260/p.depth);
+  const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,rr*2.4);
+  g.addColorStop(0,col); g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.globalCompositeOperation='lighter'; ctx.fillStyle=g;
+  ctx.beginPath(); ctx.arc(p.x,p.y,rr*2.4,0,7); ctx.fill();
+  ctx.globalCompositeOperation='source-over';
+  ctx.fillStyle=col; ctx.beginPath(); ctx.arc(p.x,p.y,rr,0,7); ctx.fill();
+  if(isR){
+    ctx.strokeStyle=(STATE&&STATE.rec.reached)?'#39ff9b':'#ff4d4d'; ctx.lineWidth=2.4;
+    ctx.beginPath(); ctx.arc(p.x,p.y,rr+6,0,7); ctx.stroke();
+  }
+  ctx.fillStyle='#eaf6ff'; ctx.font='bold 12px monospace'; ctx.textAlign='center';
+  ctx.fillText(label,p.x,p.y-rr-7); ctx.textAlign='left';
+}
+// ARRIVALS stem plot at R (travel time vs TL per eigenray) — own minimizable card.
+// Stems already reached by the wavefront (t<=Tfront) are bright; future arrivals faint.
+const arrCv=document.getElementById('arr');
+function drawArrivalsCard(){
+  if(!arrCv) return;
+  const a=arrCv.getContext('2d'), w=arrCv.width, h=arrCv.height;
+  a.clearRect(0,0,w,h); a.fillStyle='#02060d'; a.fillRect(0,0,w,h);
+  const eig=STATE&&STATE.rec.eigen;
+  if(!eig||!eig.length){ a.fillStyle='#6f93b8'; a.font='9px monospace'; a.textAlign='left'; a.fillText('no eigenrays in tol',8,h/2); return; }
+  let tmin=1e9,tmax=-1e9,tlmin=1e9,tlmax=-1e9;
+  for(const e of eig){tmin=Math.min(tmin,e.t);tmax=Math.max(tmax,e.t);tlmin=Math.min(tlmin,e.tl);tlmax=Math.max(tlmax,e.tl);}
+  if(tmax-tmin<0.05)tmax=tmin+0.05; if(tlmax-tlmin<2)tlmax=tlmin+2;
+  const padX=12, baseY=h-13, topY=9;
+  const px=t=>padX+(t-tmin)/(tmax-tmin)*(w-2*padX);
+  const py=tl=>baseY-(1-(tl-tlmin)/(tlmax-tlmin))*(baseY-topY);  // low TL (loud) = tall stem
+  a.strokeStyle='#244a6e'; a.lineWidth=1; a.beginPath(); a.moveTo(padX,baseY); a.lineTo(w-padX,baseY); a.stroke();
+  for(const e of eig){
+    const X=px(e.t), Y=py(e.tl), reached=e.t<=Tfront;
+    a.strokeStyle=reached?'rgba(120,200,255,0.9)':'rgba(120,200,255,0.22)'; a.lineWidth=1.4;
+    a.beginPath(); a.moveTo(X,baseY); a.lineTo(X,Y); a.stroke();
+    a.fillStyle=reached?'#8fffb0':'rgba(143,255,176,0.30)';
+    a.beginPath(); a.arc(X,Y,2,0,7); a.fill();
+  }
+  a.fillStyle='#6f93b8'; a.font='8px monospace'; a.textAlign='left';
+  a.fillText(tmin.toFixed(2)+'s',2,h-3); a.fillText(tlmin.toFixed(0)+'dB',2,topY+3);
+  a.textAlign='right'; a.fillText(tmax.toFixed(2)+'s',w-2,h-3); a.fillText(tlmax.toFixed(0)+'dB',w-2,baseY-1); a.textAlign='left';
+}
+
+//====================================================================================
+// 9. CROSS-SECTION (y = 12 km centerline, x-z plane) — shows pure refraction
+//====================================================================================
+const xc=document.getElementById('xsec'), xx=xc.getContext('2d');
+function renderXSec(Tfront){
+  const w=xc.width,h=xc.height, padL=30,padR=8,padT=6,padB=16;
+  const plotW=w-padL-padR, plotH=h-padT-padB;
+  const X2x=x=>padL+x/DOM[0]*plotW, Z2y=z=>padT+z/DOM[2]*plotH;
+  const g=xx.createLinearGradient(0,padT,0,padT+plotH);
+  g.addColorStop(0,'#0d3b5c'); g.addColorStop(1,'#020a14');
+  xx.fillStyle='#02060d'; xx.fillRect(0,0,w,h);
+  xx.fillStyle=g; xx.fillRect(padL,padT,plotW,plotH);
+  // seabed profile at y=12 km
+  xx.beginPath(); xx.moveTo(X2x(0),Z2y(Dbathy(0,12000)));
+  for(let i=0;i<=200;i++){const x=i/200*DOM[0]; xx.lineTo(X2x(x),Z2y(Dbathy(x,12000)));}
+  xx.lineTo(X2x(DOM[0]),Z2y(DOM[2])); xx.lineTo(X2x(0),Z2y(DOM[2])); xx.closePath();
+  xx.fillStyle='#7a6233'; xx.fill();
+  // sound-speed profile mini-curve
+  xx.strokeStyle='rgba(120,220,160,0.85)'; xx.lineWidth=1.4; xx.beginPath();
+  for(let z=0;z<=DOM[2];z+=20){ const cx=padL+plotW-46+(cz(z)-1495)/(1560-1495)*40, y=Z2y(z); if(z===0)xx.moveTo(cx,y);else xx.lineTo(cx,y); }
+  xx.stroke();
+  xx.fillStyle='rgba(120,220,160,0.9)'; xx.font='8px monospace'; xx.fillText('c(z)',padL+plotW-44,padT+9);
+  // near-plane rays (|az|<2deg) coloured by elevation, up to Tfront
+  if(STATE){
+    const rays=STATE.fan.rays;
+    for(let r=0;r<rays.length;r++){
+      const R=rays[r]; if(Math.abs(R.az)>2.0*Math.PI/180)continue;
+      const hue=(EL1-(R.el*180/Math.PI))/(EL1-EL0)*280;
+      xx.strokeStyle=`hsla(${hue},90%,62%,0.85)`; xx.lineWidth=1; xx.beginPath(); let pen=false;
+      for(let k=0;k<R.n;k++){ if(R.ST[k]>Tfront)break; const X=X2x(R.SX[k]),Y=Z2y(R.SZ[k]); if(!pen){xx.moveTo(X,Y);pen=true;}else xx.lineTo(X,Y); }
+      xx.stroke();
+    }
+  }
+  const sP=[X2x(SRC[0]),Z2y(SRC[2])], rP=[X2x(RCV[0]),Z2y(RCV[2])];
+  xx.fillStyle='#ffd479'; xx.beginPath(); xx.arc(sP[0],sP[1],3.5,0,7); xx.fill();
+  xx.fillStyle='#eaf6ff'; xx.font='9px monospace'; xx.fillText('S',sP[0]-3,sP[1]-6);
+  xx.strokeStyle=(STATE&&STATE.rec.reached)?'#39ff9b':'#ff4d4d'; xx.setLineDash([3,2]); xx.lineWidth=1.4;
+  xx.beginPath(); xx.arc(rP[0],rP[1],4.5,0,7); xx.stroke(); xx.setLineDash([]);
+  xx.fillStyle='#5ff0ff'; xx.fillText('R (y=9km)',rP[0]-6,rP[1]-7);
+  xx.strokeStyle='#244a6e'; xx.lineWidth=1; xx.strokeRect(padL,padT,plotW,plotH);
+  xx.fillStyle='#7fa6cc'; xx.font='8px monospace';
+  xx.fillText('0',padL,h-5); xx.fillText('50 km',padL+plotW-26,h-5);
+  xx.save(); xx.translate(9,padT+plotH/2); xx.rotate(-Math.PI/2); xx.fillText('depth 0–3000 m',-34,0); xx.restore();
+}
+
+//====================================================================================
+// 10. COLORBAR
+//====================================================================================
+function drawColorbar(){
+  const cv=document.getElementById('cbarCv'), c=cv.getContext('2d');
+  c.clearRect(0,0,cv.width,cv.height);
+  for(let i=0;i<120;i++){
+    const rgb=colormapTL(45+(CUTOFF-45)*i/119);
+    c.fillStyle=`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`; c.fillRect(8,18+i,16,1.2);
+  }
+  c.fillStyle='#cfe6ff'; c.font='8px monospace';
+  c.fillText('TL dB',6,12); c.fillText('45',26,24); c.fillText(''+CUTOFF,26,138);
+  c.strokeStyle='#274a6c'; c.strokeRect(8,18,16,120);
+}
+
+//====================================================================================
+// 11. ANIMATION LOOP + INTERACTION
+//====================================================================================
+let playing=false, animClock=0, lastTs=0, Tfront=0, speed=1.0, lastFps=0, fpsAcc=0,fpsN=0;
+let showVol=true, tlColormap=false, showEig=true, volOpacity=0.32;
+function frame(ts){
+  if(!lastTs)lastTs=ts; const dtw=(ts-lastTs)/1000; lastTs=ts;
+  fpsAcc+=dtw;fpsN++; if(fpsAcc>0.5){lastFps=Math.round(fpsN/fpsAcc);fpsAcc=0;fpsN=0;document.getElementById('fps').textContent=lastFps+' fps';}
+  if(playing && STATE){
+    animClock+=dtw*speed; Tfront=animClock;
+    if(Tfront>=STATE.Tmax){Tfront=STATE.Tmax; playing=false; document.getElementById('btnPlay').textContent='▶ Play';}
+    const frac=STATE.Tmax>0?Tfront/STATE.Tmax:0;
+    document.getElementById('slTime').value=Math.round(frac*1000);
+    document.getElementById('lblT').textContent=Math.round(frac*100)+'%';
+  }
+  if(camDirty){ renderStatic(); projCacheDirty=true; camDirty=false; trailDirty=true; }
+  ctx.setTransform(DPR,0,0,DPR,0,0); ctx.clearRect(0,0,W,H);
+  ctx.drawImage(off,0,0,W,H);
+  renderDynamic(Tfront);
+  renderXSec(Tfront);
+  drawArrivalsCard();
+  requestAnimationFrame(frame);
+}
+function resize(){
+  W=window.innerWidth; H=window.innerHeight; DPR=Math.min(2,window.devicePixelRatio||1);
+  for(const cv of [scene,off,volCv,trailCv]){ cv.width=W*DPR; cv.height=H*DPR; }
+  scene.style.width=W+'px'; scene.style.height=H+'px';
+  octx.setTransform(DPR,0,0,DPR,0,0);
+  camDirty=true; trailDirty=true;
+}
+window.addEventListener('resize',resize);
+let drag=false,lx=0,ly=0;
+scene.addEventListener('mousedown',e=>{drag=true;lx=e.clientX;ly=e.clientY;});
+window.addEventListener('mouseup',()=>drag=false);
+window.addEventListener('mousemove',e=>{ if(!drag)return;
+  cam.yaw+=(e.clientX-lx)*0.008; cam.pitch+=(e.clientY-ly)*0.008;
+  cam.pitch=Math.max(-1.5,Math.min(1.5,cam.pitch)); lx=e.clientX;ly=e.clientY; camDirty=true; });
+scene.addEventListener('wheel',e=>{ e.preventDefault();
+  cam.dist*=Math.exp(e.deltaY*0.0011); cam.dist=Math.max(26,Math.min(220,cam.dist)); camDirty=true; },{passive:false});
+let pinch=0;
+scene.addEventListener('touchstart',e=>{ if(e.touches.length===1){drag=true;lx=e.touches[0].clientX;ly=e.touches[0].clientY;}
+  else if(e.touches.length===2){pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);} },{passive:false});
+scene.addEventListener('touchmove',e=>{ e.preventDefault();
+  if(e.touches.length===1&&drag){ cam.yaw+=(e.touches[0].clientX-lx)*0.008; cam.pitch+=(e.touches[0].clientY-ly)*0.008;
+    cam.pitch=Math.max(-1.5,Math.min(1.5,cam.pitch)); lx=e.touches[0].clientX;ly=e.touches[0].clientY; camDirty=true; }
+  else if(e.touches.length===2){ const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+    if(pinch)cam.dist*=pinch/d; cam.dist=Math.max(26,Math.min(220,cam.dist)); pinch=d; camDirty=true; } },{passive:false});
+scene.addEventListener('touchend',()=>{drag=false;pinch=0;});
+
+//====================================================================================
+// 12. UI WIRING
+//====================================================================================
+const $=id=>document.getElementById(id);
+function setBeamLabels(){
+  $('lblEl').textContent=$('slEl').value; $('lblAz').textContent=$('slAz').value;
+  $('lblEl').className=(+$('slEl').value===41)?'canon':''; $('lblAz').className=(+$('slAz').value===31)?'canon':'';
+}
+function recompute(){
+  $('overlay').classList.remove('hidden'); $('overlay').textContent='Computing rays…';
+  setTimeout(()=>{
+    STATE=precompute(+$('slEl').value, +$('slAz').value);
+    pushMetrics(STATE);
+    camDirty=true; projCacheDirty=true;
+    playing=false; animClock=0; Tfront=0; $('btnPlay').textContent='▶ Play'; $('slTime').value=0; $('lblT').textContent='0%';
+    $('overlay').classList.add('hidden');
+  },30);
+}
+$('btnPlay').onclick=()=>{ if(!STATE)return;
+  if(Tfront>=STATE.Tmax){animClock=0;Tfront=0;}
+  playing=!playing; $('btnPlay').textContent=playing?'❚❚ Pause':'▶ Play'; lastTs=0; };
+$('btnReset').onclick=()=>{ playing=false; animClock=0; Tfront=0; trailDirty=true; $('btnPlay').textContent='▶ Play'; $('slTime').value=0; $('lblT').textContent='0%'; };
+$('btnCam').onclick=()=>{ cam={yaw:0.7692,pitch:0.456,dist:70,fov:50*Math.PI/180}; camDirty=true; };
+$('btnCanon').onclick=()=>{ $('slEl').value=41; $('slAz').value=31; setBeamLabels(); recompute(); };
+let beamTimer=null;
+function onBeam(){ setBeamLabels(); clearTimeout(beamTimer); beamTimer=setTimeout(recompute,200); }
+$('slEl').oninput=onBeam; $('slAz').oninput=onBeam;
+$('slTime').oninput=()=>{ if(!STATE)return; playing=false; $('btnPlay').textContent='▶ Play';
+  Tfront=animClock=(+$('slTime').value/1000)*STATE.Tmax; trailDirty=true; $('lblT').textContent=Math.round(+$('slTime').value/10)+'%'; };
+$('slSpd').oninput=()=>{ speed=+$('slSpd').value/100; $('lblSpd').textContent=speed.toFixed(1)+'×'; };
+$('slOp').oninput=()=>{ volOpacity=+$('slOp').value/100; $('lblOp').textContent=volOpacity.toFixed(2); camDirty=true; };
+$('ckTL').onchange=()=>{ tlColormap=$('ckTL').checked; $('cbar').className=tlColormap?'on':''; camDirty=true; };
+$('ckVol').onchange=()=>{ showVol=$('ckVol').checked; camDirty=true; };
+$('ckEig').onchange=()=>{ showEig=$('ckEig').checked; };
+
+// collapsible / minimizable cards
+document.querySelectorAll('.min').forEach(b=>b.addEventListener('click',e=>{
+  e.stopPropagation();
+  const c=b.closest('.panel').classList.toggle('collapsed');
+  b.textContent=c?'+':'–';
+}));
+document.querySelectorAll('.phead').forEach(hd=>hd.addEventListener('click',()=>{const b=hd.querySelector('.min'); if(b)b.click();}));
+
+//====================================================================================
+// 13. BOOT
+//====================================================================================
+resize(); drawColorbar(); setBeamLabels();
+requestAnimationFrame(frame);
+setTimeout(()=>{ STATE=precompute(41,31); pushMetrics(STATE); camDirty=true; projCacheDirty=true; $('overlay').classList.add('hidden'); },40);
+</script>
+</body>
+</html>

@@ -1,0 +1,1313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>3D Ocean Acoustic Ray Shadow Zones</title>
+<!--
+ASSUMPTIONS / MODEL NOTES
+- Canonical launch fan: 41 elevation beams from -20 to +20 degrees and 31 azimuth beams from -15 to +15 degrees about +x, for 1271 rays. Elevation is positive upward; z increases downward.
+- Canonical comparison grid: 101 x 49 x 31 nodes spanning x=0..50 km, y=0..24 km, z=0..3000 m, row-major with x fastest.
+- Ray integration: arclength step ds = 150 m, max path length = 85 km. Continuous refraction uses d(u/c)/ds = grad(1/c), implemented as du/ds = -(dc/dz/c) * (e_z - u_z u), so rays bend toward lower sound speed.
+- Boundary model: z=0 pressure-release surface is specular with no magnitude loss. Seabed uses the full local 3D normal of z=D(x,y); sloped reflections can change y and leave the launch vertical plane.
+- Seabed loss: the specified half-space (c=1600 m/s, rho=1.8 g/cc, alpha=0.5 dB/lambda) is represented by a constant 3.0 dB per seabed bounce, a light broadband proxy for a lossy Rayleigh reflection magnitude. Surface bounces have 0 dB loss.
+- TL model: geometric ray-tube approximation. Each ray point receives TL = 10 log10(A_tube / dOmega) + boundary losses, where A_tube is a finite-difference Jacobian area across neighboring launch beams. Caustics are clamped to finite area; this is not a full-wave or caustic-corrected model.
+- Coverage / shadow: ray samples update a static 3D voxel/grid TL field with an ellipsoidal tube kernel (650 m range, 650 m cross-range, 260 m depth). A water voxel is "shadow" when TL >= 118 dB or unreached. Voxels below the seabed are assigned high TL and are excluded from the water-volume fractions.
+- Eigenray tolerance: a traced ray connects S to R when its closest segment passes within 400 m of R. This tolerance is stated in the metrics card and used for the arrivals stem plot.
+- Reciprocity self-check: uses the same fan and physics with source/receiver swapped and fan aimed about -x. Convergence self-check uses 82 x 62 beams (2x canonical counts) and compares insonified fraction and TL(R) against canonical.
+- Rendering: vanilla JavaScript + 2D canvas; no external libraries, fonts, network, or parent-page assumptions. Metrics are posted to the parent via window.parent.postMessage({type:'ray_metrics', ...}, '*').
+-->
+<style>
+  :root {
+    --ink: #e8f7ff;
+    --muted: rgba(216, 239, 255, .72);
+    --faint: rgba(180, 226, 255, .16);
+    --panel: rgba(4, 18, 34, .78);
+    --panel-2: rgba(7, 35, 56, .72);
+    --line: rgba(155, 221, 255, .22);
+    --accent: #80f7ff;
+    --warn: #ffcf7a;
+    --danger: #ff5b6e;
+    --ok: #7dffb2;
+  }
+  * { box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #020815; color: var(--ink); }
+  body { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: grab; touch-action: none; }
+  canvas:active { cursor: grabbing; }
+  .focusBtn {
+    position: fixed;
+    z-index: 20;
+    inset: 14px auto auto 50%;
+    transform: translateX(-50%);
+    padding: 6px 11px;
+    font-size: 11px;
+    background: linear-gradient(180deg, rgba(165,255,241,.96), rgba(79,213,232,.92));
+    border-color: rgba(188,255,250,.92);
+    color: #00131f;
+    font-weight: 850;
+    box-shadow: 0 12px 34px rgba(0,0,0,.32), 0 0 24px rgba(92,232,255,.22);
+  }
+  .focusBtn:hover { transform: translateX(-50%) translateY(-1px); }
+  .hud {
+    position: fixed;
+    inset: 14px auto auto 14px;
+    width: min(288px, calc(100vw - 24px));
+    display: grid;
+    gap: 7px;
+    pointer-events: none;
+  }
+  .panel {
+    pointer-events: auto;
+    border: 1px solid var(--line);
+    background: linear-gradient(135deg, rgba(2, 12, 24, .74), rgba(4, 18, 34, .66));
+    box-shadow: 0 18px 70px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.06);
+    border-radius: 15px;
+    backdrop-filter: blur(16px);
+  }
+  .title {
+    padding: 9px 11px 8px;
+    position: relative;
+    overflow: hidden;
+  }
+  .title::after {
+    content: "";
+    position: absolute;
+    inset: auto -20% -40px 30%;
+    height: 82px;
+    background: radial-gradient(circle, rgba(128,247,255,.24), transparent 65%);
+    pointer-events: none;
+  }
+  h1 { margin: 0; font-size: 13.5px; line-height: 1.15; letter-spacing: .01em; font-weight: 760; }
+  .subtitle { margin-top: 3px; color: var(--muted); font-size: 9.5px; line-height: 1.25; }
+  .controls { padding: 7px; display: grid; gap: 6px; }
+  .row { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+  button, .toggleLabel {
+    border: 1px solid rgba(151, 226, 255, .28);
+    background: linear-gradient(180deg, rgba(21, 74, 101, .78), rgba(8, 32, 52, .86));
+    color: var(--ink);
+    border-radius: 999px;
+    padding: 5px 7px;
+    font-size: 10px;
+    letter-spacing: .01em;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 8px 20px rgba(0,0,0,.20);
+    cursor: pointer;
+    transition: transform .16s cubic-bezier(.22,1,.36,1), border-color .16s, background .16s;
+  }
+  button:hover, .toggleLabel:hover { transform: translateY(-1px); border-color: rgba(128,247,255,.58); }
+  button:active { transform: translateY(1px) scale(.99); }
+  .primary { color: #00131f; border-color: rgba(158,255,245,.88); background: linear-gradient(180deg, #a8fff2, #58dbe8); font-weight: 800; }
+  .miniBtn { padding: 4px 7px; font-size: 9.5px; background: rgba(3, 22, 39, .72); }
+  .toggleLabel { display: inline-flex; gap: 5px; align-items: center; }
+  .toggleLabel input { accent-color: var(--accent); }
+  .sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .sliderBox { border: 1px solid rgba(153, 219, 255, .16); background: rgba(1, 14, 27, .28); border-radius: 10px; padding: 6px; }
+  .sliderBox.wide { grid-column: 1 / -1; }
+  label { display: grid; gap: 3px; font-size: 10px; color: var(--muted); }
+  label b { color: var(--ink); font-size: 11px; font-weight: 760; }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .tickNote { color: rgba(225,245,255,.56); font-size: 9px; display:flex; justify-content:space-between; }
+  .metrics {
+    position: fixed;
+    inset: 14px 14px auto auto;
+    width: min(286px, calc(100vw - 24px));
+    padding: 8px 9px;
+    max-height: calc(100vh - 28px);
+    overflow: auto;
+  }
+  .metricHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .metrics h2 { margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: rgba(224,248,255,.86); }
+  .badgeRow { display:flex; gap:6px; flex-wrap: wrap; margin-bottom: 7px; }
+  .badge { font-size: 9px; letter-spacing: .04em; text-transform: uppercase; padding: 3px 6px; border-radius: 999px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.05); color: var(--muted); }
+  .badge.ok { color: #041a10; background: var(--ok); border-color: var(--ok); font-weight: 800; }
+  .badge.bad { color: #26050a; background: var(--danger); border-color: var(--danger); font-weight: 800; }
+  .badge.warn { color: #2a1900; background: var(--warn); border-color: var(--warn); font-weight: 800; }
+  .gridMetrics { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .metricItem { border: 1px solid rgba(153, 219, 255, .14); border-radius: 10px; padding: 5px 6px; background: rgba(2, 18, 32, .34); min-height: 42px; }
+  .metricItem.quotaKpi {
+    border-color: rgba(128,247,255,.32);
+    background: linear-gradient(135deg, rgba(27, 88, 110, .38), rgba(2, 18, 32, .36));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 0 22px rgba(91, 230, 255, .08);
+  }
+  .metricItem .k { color: rgba(224,248,255,.62); font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+  .metricItem .v { margin-top: 2px; font-size: 10.8px; font-weight: 760; line-height: 1.18; }
+  .metricItem .sub { margin-top: 2px; font-size: 8.5px; color: rgba(218,244,255,.48); line-height: 1.18; }
+  .metricItem.wide { grid-column: 1 / -1; }
+  .arrivals { width: 100%; height: 50px; margin-top: 6px; border-radius: 9px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.08); }
+  .legend {
+    position: fixed;
+    inset: auto 14px 14px auto;
+    width: 190px;
+    padding: 7px 9px;
+    font-size: 9.5px;
+    color: var(--muted);
+  }
+  .legend .sw { display:inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; box-shadow: 0 0 10px currentColor; }
+  .legend div { margin: 4px 0; }
+  body.controls-collapsed .controls .sliders { display: none; }
+  body.metrics-collapsed #metricGrid,
+  body.metrics-collapsed #arrivals { display: none; }
+  body.metrics-collapsed .metrics { width: min(250px, calc(100vw - 24px)); }
+  body.metrics-collapsed .badgeRow { margin-bottom: 0; }
+  body.ui-minimized .title,
+  body.ui-minimized .metrics,
+  body.ui-minimized .legend,
+  body.ui-minimized .statusLine { display: none; }
+  body.ui-minimized .hud { width: auto; }
+  body.ui-minimized .controls {
+    padding: 8px;
+    border-radius: 999px;
+    background: rgba(2, 14, 27, .72);
+  }
+  body.ui-minimized .controls .sliders,
+  body.ui-minimized #cameraBtn,
+  body.ui-minimized #canonicalBtn,
+  body.ui-minimized #slidersCollapseBtn,
+  body.ui-minimized .toggleLabel { display: none; }
+  .statusLine {
+    position: fixed;
+    left: 50%; bottom: 18px; transform: translateX(-50%);
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: rgba(0,0,0,.38);
+    border: 1px solid rgba(151, 226, 255, .18);
+    color: rgba(225,245,255,.74);
+    font-size: 12px;
+    pointer-events: none;
+  }
+  @media (max-width: 920px) {
+    .metrics { inset: auto 10px 10px 10px; width: auto; max-height: 38vh; }
+    .legend { display: none; }
+    .hud { inset: 10px 10px auto 10px; width: auto; }
+    .title { display: none; }
+    .sliders { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body class="controls-collapsed">
+<canvas id="scene" aria-label="3D acoustic ray propagation visualization"></canvas>
+<button id="focusBtn" class="focusBtn">Focus view</button>
+
+<div class="hud">
+  <div class="panel title">
+    <h1>3D Ocean Ray Propagation & Shadow Zones</h1>
+    <div class="subtitle">Sound-speed refraction + true 3D seamount reflections. Drag to orbit; wheel/pinch to zoom. Animation starts only when Play is pressed.</div>
+  </div>
+  <div class="panel controls">
+    <div class="row">
+      <button id="playBtn" class="primary">Play</button>
+      <button id="resetBtn">Reset</button>
+      <button id="cameraBtn">Camera</button>
+      <button id="canonicalBtn">Canonical</button>
+      <label class="toggleLabel"><input id="tlToggle" type="checkbox" /> TL colour</label>
+      <button id="slidersCollapseBtn" class="miniBtn">Show sliders</button>
+    </div>
+    <div class="sliders">
+      <div class="sliderBox">
+        <label><span>Elevation beams <b id="elevVal">41</b></span><input id="elevSlider" type="range" min="11" max="83" step="2" value="41" list="elevTicks" /></label>
+        <datalist id="elevTicks"><option value="41"></option></datalist>
+        <div class="tickNote"><span>11</span><span>canonical 41</span><span>83</span></div>
+      </div>
+      <div class="sliderBox">
+        <label><span>Azimuth beams <b id="azVal">31</b></span><input id="azSlider" type="range" min="9" max="63" step="2" value="31" list="azTicks" /></label>
+        <datalist id="azTicks"><option value="31"></option></datalist>
+        <div class="tickNote"><span>9</span><span>canonical 31</span><span>63</span></div>
+      </div>
+      <div class="sliderBox wide">
+        <label><span>Time scrub <b id="timeVal">0.0 s</b></span><input id="timeSlider" type="range" min="0" max="60" step="0.05" value="0" /></label>
+        <div class="tickNote"><span>pre-emission</span><span>wavefront travel time</span></div>
+      </div>
+      <div class="sliderBox">
+        <label><span>Playback speed <b id="speedVal">1.0×</b></span><input id="speedSlider" type="range" min="0.25" max="8" step="0.25" value="1" /></label>
+      </div>
+      <div class="sliderBox">
+        <label><span>Volume opacity <b id="opacityVal">28%</b></span><input id="opacitySlider" type="range" min="0" max="100" step="1" value="28" /></label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="panel metrics" id="metricsPanel">
+  <div class="metricHeader">
+    <h2>Canonical metrics</h2>
+    <button id="metricsCollapseBtn" class="miniBtn">Minimize</button>
+  </div>
+  <div class="badgeRow" id="badgeRow"><span class="badge warn">tracing…</span></div>
+  <div class="gridMetrics" id="metricGrid"></div>
+  <canvas class="arrivals" id="arrivals" width="340" height="72" aria-label="Arrival stem plot"></canvas>
+</div>
+
+<div class="panel legend">
+  <div><span class="sw" style="color:#78eaff;background:#78eaff"></span>Insonified volume (TL &lt; 118 dB)</div>
+  <div><span class="sw" style="color:#ffcc77;background:#94784b"></span>Warm shaded seabed / seamounts</div>
+  <div><span class="sw" style="color:#ffffff;background:#fff"></span>Source S</div>
+  <div><span class="sw" style="color:#78eaff;background:#78eaff"></span>Receiver R (green reached, red shadowed)</div>
+  <div><span class="sw" style="color:#ff6f8f;background:#ff6f8f"></span>Ray fan coloured by launch angle</div>
+</div>
+<div class="statusLine" id="statusLine">Preparing model…</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('scene');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const arrivalsCanvas = document.getElementById('arrivals');
+  const arrivalsCtx = arrivalsCanvas.getContext('2d');
+
+  const UI = {
+    focusBtn: document.getElementById('focusBtn'),
+    playBtn: document.getElementById('playBtn'),
+    resetBtn: document.getElementById('resetBtn'),
+    cameraBtn: document.getElementById('cameraBtn'),
+    canonicalBtn: document.getElementById('canonicalBtn'),
+    slidersCollapseBtn: document.getElementById('slidersCollapseBtn'),
+    metricsCollapseBtn: document.getElementById('metricsCollapseBtn'),
+    tlToggle: document.getElementById('tlToggle'),
+    elevSlider: document.getElementById('elevSlider'),
+    azSlider: document.getElementById('azSlider'),
+    timeSlider: document.getElementById('timeSlider'),
+    speedSlider: document.getElementById('speedSlider'),
+    opacitySlider: document.getElementById('opacitySlider'),
+    elevVal: document.getElementById('elevVal'),
+    azVal: document.getElementById('azVal'),
+    timeVal: document.getElementById('timeVal'),
+    speedVal: document.getElementById('speedVal'),
+    opacityVal: document.getElementById('opacityVal'),
+    metricGrid: document.getElementById('metricGrid'),
+    badgeRow: document.getElementById('badgeRow'),
+    statusLine: document.getElementById('statusLine'),
+    metricsPanel: document.getElementById('metricsPanel')
+  };
+
+  const RAD = Math.PI / 180;
+  const DOMAIN = { x0: 0, x1: 50000, y0: 0, y1: 24000, z0: 0, z1: 3000 };
+  const SRC = { x: 0, y: 12000, z: 50 };
+  const RCV = { x: 40000, y: 9000, z: 1000 };
+  const CANON = { elev: 41, az: 31, hiElev: 82, hiAz: 62, nx: 101, ny: 49, nz: 31 };
+  const STEP_M = 150;
+  const MAX_ARC_M = 85000;
+  const BOTTOM_LOSS_DB = 3.0;
+  const TL_MAX = 180;
+  const TL_LAND = 200;
+  const TL_CUTOFF = 118;
+  const EIGEN_TOL_M = 400;
+  const KERNEL = { x: 650, y: 650, z: 260 };
+  const VERT_EXAG = 4.0;
+  const GRID_DX = (DOMAIN.x1 - DOMAIN.x0) / (CANON.nx - 1);
+  const GRID_DY = (DOMAIN.y1 - DOMAIN.y0) / (CANON.ny - 1);
+  const GRID_DZ = (DOMAIN.z1 - DOMAIN.z0) / (CANON.nz - 1);
+
+  const state = {
+    w: 1,
+    h: 1,
+    dpr: 1,
+    yaw: -0.72,
+    pitch: 0.48,
+    zoom: 1.0,
+    playing: false,
+    animTime: 0,
+    speed: 1,
+    lastFrame: performance.now(),
+    fps: 0,
+    canonical: null,
+    current: null,
+    reverse: null,
+    convergence: null,
+    computing: false,
+    offCanonical: false,
+    pointer: null,
+    bathyMesh: [],
+    xGrid: new Float32Array(CANON.nx),
+    yGrid: new Float32Array(CANON.ny),
+    zGrid: new Float32Array(CANON.nz),
+    waterMask: new Uint8Array(CANON.nx * CANON.ny * CANON.nz),
+    waterCount: 0,
+    fileKB: 0,
+    sessionStart: performance.now(),
+    frameCount: 0,
+    traceQuotaUnits: 0,
+    traceQuotaMs: 0,
+    renderQuotaSegments: 0
+  };
+
+  for (let i = 0; i < CANON.nx; i++) state.xGrid[i] = DOMAIN.x0 + i * GRID_DX;
+  for (let i = 0; i < CANON.ny; i++) state.yGrid[i] = DOMAIN.y0 + i * GRID_DY;
+  for (let i = 0; i < CANON.nz; i++) state.zGrid[i] = DOMAIN.z0 + i * GRID_DZ;
+
+  function setStatus(text) { UI.statusLine.textContent = text; }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function hypot3(x, y, z) { return Math.sqrt(x*x + y*y + z*z); }
+  function fmt(v, digits = 1) { return Number.isFinite(v) ? v.toFixed(digits) : '—'; }
+  function idx3(ix, iy, iz) { return ix + CANON.nx * (iy + CANON.ny * iz); }
+  function dist3(a, b) { return hypot3(a.x - b.x, a.y - b.y, a.z - b.z); }
+  function dot(a, b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
+  function cross(a, b) { return { x: a.y*b.z - a.z*b.y, y: a.z*b.x - a.x*b.z, z: a.x*b.y - a.y*b.x }; }
+  function sub(a, b) { return { x: a.x-b.x, y: a.y-b.y, z: a.z-b.z }; }
+  function mul(a, s) { return { x: a.x*s, y: a.y*s, z: a.z*s }; }
+  function add(a, b) { return { x: a.x+b.x, y: a.y+b.y, z: a.z+b.z }; }
+  function norm(v) { const m = Math.max(1e-12, hypot3(v.x, v.y, v.z)); return { x: v.x/m, y: v.y/m, z: v.z/m }; }
+  function hsl(h, s, l, a = 1) { return `hsla(${((h%360)+360)%360}, ${s}%, ${l}%, ${a})`; }
+
+  function soundSpeed(z) {
+    return z <= 200 ? 1520 - 0.10 * z : 1500 + 0.018 * (z - 200);
+  }
+  function dcDz(z) { return z <= 200 ? -0.10 : 0.018; }
+
+  function bathymetry(x, y) {
+    const xk = x / 1000, yk = y / 1000;
+    const q1 = ((xk - 18) / 2.5) ** 2 + ((yk - 12) / 3.0) ** 2;
+    const q2 = ((xk - 34) / 2.0) ** 2 + ((yk - 9) / 2.5) ** 2;
+    return 2500 - 1500 * Math.exp(-q1) - 1900 * Math.exp(-q2);
+  }
+
+  function bathyGrad(x, y) {
+    const xk = x / 1000, yk = y / 1000;
+    const dx1 = xk - 18, dy1 = yk - 12;
+    const dx2 = xk - 34, dy2 = yk - 9;
+    const e1 = Math.exp(-((dx1/2.5)**2 + (dy1/3.0)**2));
+    const e2 = Math.exp(-((dx2/2.0)**2 + (dy2/2.5)**2));
+    const dDdxKm = 1500 * e1 * (2 * dx1 / (2.5*2.5)) + 1900 * e2 * (2 * dx2 / (2.0*2.0));
+    const dDdyKm = 1500 * e1 * (2 * dy1 / (3.0*3.0)) + 1900 * e2 * (2 * dy2 / (2.5*2.5));
+    return { dx: dDdxKm / 1000, dy: dDdyKm / 1000 };
+  }
+
+  function initWaterMask() {
+    let water = 0;
+    for (let iz = 0; iz < CANON.nz; iz++) {
+      const z = state.zGrid[iz];
+      for (let iy = 0; iy < CANON.ny; iy++) {
+        const y = state.yGrid[iy];
+        for (let ix = 0; ix < CANON.nx; ix++) {
+          const x = state.xGrid[ix];
+          const ok = z <= bathymetry(x, y) + 1;
+          state.waterMask[idx3(ix,iy,iz)] = ok ? 1 : 0;
+          if (ok) water++;
+        }
+      }
+    }
+    state.waterCount = water;
+  }
+
+  function buildBathyMesh() {
+    const nx = 52, ny = 30;
+    const verts = [];
+    for (let iy = 0; iy < ny; iy++) {
+      const y = DOMAIN.y0 + (DOMAIN.y1 - DOMAIN.y0) * iy / (ny - 1);
+      const row = [];
+      for (let ix = 0; ix < nx; ix++) {
+        const x = DOMAIN.x0 + (DOMAIN.x1 - DOMAIN.x0) * ix / (nx - 1);
+        const z = bathymetry(x, y);
+        row.push({ x, y, z });
+      }
+      verts.push(row);
+    }
+    const cells = [];
+    for (let iy = 0; iy < ny - 1; iy++) {
+      for (let ix = 0; ix < nx - 1; ix++) {
+        const a = verts[iy][ix], b = verts[iy][ix+1], c = verts[iy+1][ix+1], d = verts[iy+1][ix];
+        const cx = (a.x+b.x+c.x+d.x)/4, cy = (a.y+b.y+c.y+d.y)/4;
+        const g = bathyGrad(cx, cy);
+        const n = norm({ x: -g.dx, y: -g.dy, z: 1 });
+        const light = norm({ x: -0.25, y: -0.55, z: -0.80 });
+        const shade = clamp(0.52 + 0.48 * Math.abs(dot(n, light)), 0, 1);
+        cells.push({ pts: [a,b,c,d], shade, cx, cy, z: (a.z+b.z+c.z+d.z)/4 });
+      }
+    }
+    state.bathyMesh = cells;
+  }
+
+  function traceRay(source, baseYaw, elevDeg, azDeg, ie, ia, elevCount, azCount) {
+    const er = elevDeg * RAD;
+    const ar = baseYaw + azDeg * RAD;
+    let u = norm({ x: Math.cos(er) * Math.cos(ar), y: Math.cos(er) * Math.sin(ar), z: -Math.sin(er) });
+    let p = { x: source.x, y: source.y, z: source.z };
+    let s = 0, t = 0, lossDb = 0, bottomBounces = 0, surfaceBounces = 0;
+    const points = [{ x:p.x, y:p.y, z:p.z, t, s, lossDb, tlDb: 0 }];
+    const planeN = { x: -Math.sin(ar), y: Math.cos(ar), z: 0 };
+    let maxPlane = 0;
+    let segInv0 = Math.sqrt(u.x*u.x + u.y*u.y) / soundSpeed(p.z);
+    let maxSnell = 0;
+
+    for (let step = 0; step < Math.ceil(MAX_ARC_M / STEP_M); step++) {
+      const c0 = soundSpeed(clamp(p.z, 0, DOMAIN.z1));
+      const g = -dcDz(clamp(p.z, 0, DOMAIN.z1)) / c0;
+      // First-order arclength integration of refractive ray equation.
+      u.x += STEP_M * g * (-u.z * u.x);
+      u.y += STEP_M * g * (-u.z * u.y);
+      u.z += STEP_M * g * (1 - u.z * u.z);
+      u = norm(u);
+
+      let q = { x: p.x + u.x * STEP_M, y: p.y + u.y * STEP_M, z: p.z + u.z * STEP_M };
+      let reflected = false;
+
+      if (q.z < 0) {
+        const f = clamp(p.z / Math.max(1e-9, p.z - q.z), 0, 1);
+        q = { x: lerp(p.x, q.x, f), y: lerp(p.y, q.y, f), z: 0 };
+        u.z *= -1;
+        surfaceBounces++;
+        reflected = true;
+        q.z = Math.max(0.15, q.z + u.z * 0.5);
+      }
+
+      const hq = q.z - bathymetry(q.x, q.y);
+      if (hq > 0) {
+        let lo = 0, hi = 1, hit = q;
+        for (let k = 0; k < 14; k++) {
+          const m = (lo + hi) / 2;
+          const r = { x: lerp(p.x, q.x, m), y: lerp(p.y, q.y, m), z: lerp(p.z, q.z, m) };
+          if (r.z - bathymetry(r.x, r.y) > 0) { hi = m; hit = r; } else { lo = m; }
+        }
+        q = hit;
+        const grad = bathyGrad(q.x, q.y);
+        const n = norm({ x: -grad.dx, y: -grad.dy, z: 1 });
+        const udn = dot(u, n);
+        u = norm({ x: u.x - 2 * udn * n.x, y: u.y - 2 * udn * n.y, z: u.z - 2 * udn * n.z });
+        bottomBounces++;
+        lossDb += BOTTOM_LOSS_DB;
+        reflected = true;
+        q = { x: q.x + u.x * 1.5, y: q.y + u.y * 1.5, z: q.z + u.z * 1.5 };
+        const dNow = bathymetry(q.x, q.y);
+        if (q.z > dNow - 0.2) q.z = dNow - 0.2;
+      }
+
+      const dsActual = Math.max(1, dist3(p, q));
+      s += dsActual;
+      t += dsActual / c0;
+      p = q;
+
+      const inv = Math.sqrt(u.x*u.x + u.y*u.y) / soundSpeed(clamp(p.z, 0, DOMAIN.z1));
+      // cos(theta)/c is conserved only along CONTINUOUS refraction. A sloped bottom bounce
+      // changes the horizontal direction and legitimately changes this invariant, so reset the
+      // baseline at a reflection instead of recording the physical jump as integration drift.
+      if (reflected) { segInv0 = inv; }
+      else { maxSnell = Math.max(maxSnell, Math.abs(inv - segInv0)); }
+      const planeDist = Math.abs((p.x - source.x) * planeN.x + (p.y - source.y) * planeN.y);
+      maxPlane = Math.max(maxPlane, planeDist);
+
+      if (p.x < DOMAIN.x0 - 2200 || p.x > DOMAIN.x1 + 2600 || p.y < DOMAIN.y0 - 4200 || p.y > DOMAIN.y1 + 4200 || s > MAX_ARC_M) {
+        points.push({ x:p.x, y:p.y, z:clamp(p.z,0,DOMAIN.z1), t, s, lossDb, tlDb: TL_MAX });
+        break;
+      }
+      points.push({ x:p.x, y:p.y, z:clamp(p.z,0,DOMAIN.z1), t, s, lossDb, tlDb: TL_MAX });
+    }
+
+    return {
+      points, elevDeg, azDeg, ie, ia, elevCount, azCount, bottomBounces, surfaceBounces,
+      color: hsl(205 + (elevDeg + 20) * 3.2 + (azDeg + 15) * 2.1, 92, 62, 1),
+      maxPlane, maxSnell, closest: null
+    };
+  }
+
+  function annotateTubeTL(rays2D, elevCount, azCount) {
+    const dEl = (40 * RAD) / Math.max(1, elevCount - 1);
+    const dAz = (30 * RAD) / Math.max(1, azCount - 1);
+    let maxTime = 0, maxSnell = 0, maxPlane = 0;
+
+    function neighborPoint(ie, ia, pi) {
+      if (ie < 0 || ia < 0 || ie >= elevCount || ia >= azCount) return null;
+      const r = rays2D[ie][ia];
+      return pi < r.points.length ? r.points[pi] : null;
+    }
+
+    for (let ie = 0; ie < elevCount; ie++) {
+      for (let ia = 0; ia < azCount; ia++) {
+        const ray = rays2D[ie][ia];
+        const cosEl = Math.max(0.08, Math.cos(ray.elevDeg * RAD));
+        maxSnell = Math.max(maxSnell, ray.maxSnell);
+        maxPlane = Math.max(maxPlane, ray.maxPlane);
+        for (let pi = 0; pi < ray.points.length; pi++) {
+          const p = ray.points[pi];
+          maxTime = Math.max(maxTime, p.t);
+          if (pi === 0 || p.s < 1) { p.tlDb = 0; continue; }
+          let ve = null, va = null;
+          const pe0 = neighborPoint(ie - 1, ia, pi), pe1 = neighborPoint(ie + 1, ia, pi);
+          const pa0 = neighborPoint(ie, ia - 1, pi), pa1 = neighborPoint(ie, ia + 1, pi);
+          if (pe0 && pe1) ve = mul(sub(pe1, pe0), 1 / (2*dEl));
+          else if (pe1) ve = mul(sub(pe1, p), 1 / dEl);
+          else if (pe0) ve = mul(sub(p, pe0), 1 / dEl);
+          if (pa0 && pa1) va = mul(sub(pa1, pa0), 1 / (2*dAz));
+          else if (pa1) va = mul(sub(pa1, p), 1 / dAz);
+          else if (pa0) va = mul(sub(p, pa0), 1 / dAz);
+
+          let areaNorm = p.s * p.s;
+          if (ve && va) {
+            const areaJac = hypot3(...Object.values(cross(ve, va)));
+            areaNorm = areaJac / cosEl;
+          }
+          // Clamp caustics / crossing ray tubes to finite intensity.
+          areaNorm = clamp(areaNorm, 1, 10 ** 18);
+          p.tlDb = clamp(10 * Math.log10(areaNorm) + p.lossDb, 0, TL_MAX);
+        }
+      }
+    }
+    return { maxTime, maxSnell, maxPlane };
+  }
+
+  function closestRayAnalysis(rays, target) {
+    const eigenrays = [];
+    let nearest = { dist: Infinity, tlDb: TL_MAX, t: Infinity, ray: null, point: null };
+    for (const ray of rays) {
+      let best = { dist: Infinity, tlDb: TL_MAX, t: Infinity, point: null };
+      for (let i = 1; i < ray.points.length; i++) {
+        const a = ray.points[i-1], b = ray.points[i];
+        const ab = sub(b, a);
+        const ap = sub(target, a);
+        const ab2 = Math.max(1e-9, dot(ab, ab));
+        const u = clamp(dot(ap, ab) / ab2, 0, 1);
+        const cp = { x: a.x + ab.x*u, y: a.y + ab.y*u, z: a.z + ab.z*u };
+        const d = dist3(cp, target);
+        if (d < best.dist) {
+          best = { dist: d, tlDb: lerp(a.tlDb, b.tlDb, u), t: lerp(a.t, b.t, u), point: cp };
+        }
+      }
+      ray.closest = best;
+      if (best.dist < nearest.dist) nearest = { ...best, ray };
+      if (best.dist <= EIGEN_TOL_M) {
+        eigenrays.push({ ray, dist: best.dist, tlDb: best.tlDb, t: best.t, amp: Math.pow(10, -best.tlDb/20) });
+      }
+    }
+    eigenrays.sort((a,b) => a.t - b.t || a.tlDb - b.tlDb);
+    return { nearest, eigenrays };
+  }
+
+  function computeField(rays) {
+    const n = CANON.nx * CANON.ny * CANON.nz;
+    const field = new Float32Array(n);
+    for (let i = 0; i < n; i++) field[i] = state.waterMask[i] ? TL_MAX : TL_LAND;
+
+    const ixSpan = Math.ceil(KERNEL.x / GRID_DX);
+    const iySpan = Math.ceil(KERNEL.y / GRID_DY);
+    const izSpan = Math.ceil(KERNEL.z / GRID_DZ);
+    for (const ray of rays) {
+      for (let pi = 1; pi < ray.points.length; pi++) {
+        const p = ray.points[pi];
+        if (p.x < DOMAIN.x0 || p.x > DOMAIN.x1 || p.y < DOMAIN.y0 || p.y > DOMAIN.y1 || p.z < DOMAIN.z0 || p.z > DOMAIN.z1) continue;
+        if (p.z > bathymetry(p.x, p.y) + 1) continue;
+        const ix0 = Math.round((p.x - DOMAIN.x0) / GRID_DX);
+        const iy0 = Math.round((p.y - DOMAIN.y0) / GRID_DY);
+        const iz0 = Math.round((p.z - DOMAIN.z0) / GRID_DZ);
+        for (let iz = Math.max(0, iz0 - izSpan); iz <= Math.min(CANON.nz - 1, iz0 + izSpan); iz++) {
+          const dz = state.zGrid[iz] - p.z;
+          const zz = (dz / KERNEL.z) ** 2;
+          if (zz > 1) continue;
+          for (let iy = Math.max(0, iy0 - iySpan); iy <= Math.min(CANON.ny - 1, iy0 + iySpan); iy++) {
+            const dy = state.yGrid[iy] - p.y;
+            const yy = zz + (dy / KERNEL.y) ** 2;
+            if (yy > 1) continue;
+            for (let ix = Math.max(0, ix0 - ixSpan); ix <= Math.min(CANON.nx - 1, ix0 + ixSpan); ix++) {
+              const index = idx3(ix, iy, iz);
+              if (!state.waterMask[index]) continue;
+              const dx = state.xGrid[ix] - p.x;
+              const rr = yy + (dx / KERNEL.x) ** 2;
+              if (rr > 1) continue;
+              const candidate = p.tlDb + 6.0 * rr;
+              if (candidate < field[index]) field[index] = candidate;
+            }
+          }
+        }
+      }
+    }
+
+    let inson = 0;
+    for (let i = 0; i < n; i++) if (state.waterMask[i] && field[i] < TL_CUTOFF) inson++;
+    return { field, insonifiedCount: inson, insonifiedFraction: state.waterCount ? inson / state.waterCount : 0, shadowFraction: state.waterCount ? 1 - inson / state.waterCount : 1 };
+  }
+
+  function sampleNearestField(field, point) {
+    const ix = clamp(Math.round((point.x - DOMAIN.x0) / GRID_DX), 0, CANON.nx - 1);
+    const iy = clamp(Math.round((point.y - DOMAIN.y0) / GRID_DY), 0, CANON.ny - 1);
+    const iz = clamp(Math.round((point.z - DOMAIN.z0) / GRID_DZ), 0, CANON.nz - 1);
+    return field[idx3(ix,iy,iz)];
+  }
+
+  function buildCoveragePoints(field) {
+    const pts = [];
+    // Deterministic stratified thinning keeps render fast while preserving 3D structure.
+    for (let iz = 0; iz < CANON.nz; iz++) {
+      for (let iy = 0; iy < CANON.ny; iy++) {
+        for (let ix = 0; ix < CANON.nx; ix++) {
+          const index = idx3(ix,iy,iz);
+          const tl = field[index];
+          if (!state.waterMask[index] || tl >= TL_CUTOFF) continue;
+          const keep = ((ix * 17 + iy * 31 + iz * 43) % 5) < 2 || tl < 96;
+          if (keep) pts.push({ x: state.xGrid[ix], y: state.yGrid[iy], z: state.zGrid[iz], tl });
+        }
+      }
+    }
+    return pts;
+  }
+
+  function computeModel(elevCount, azCount, options = {}) {
+    const source = options.source || SRC;
+    const target = options.target || RCV;
+    const baseYaw = options.baseYaw || 0;
+    const makeField = options.makeField !== false;
+    const t0 = performance.now();
+    const rays2D = [];
+    const rays = [];
+    for (let ie = 0; ie < elevCount; ie++) {
+      const elevDeg = elevCount === 1 ? 0 : -20 + 40 * ie / (elevCount - 1);
+      const row = [];
+      for (let ia = 0; ia < azCount; ia++) {
+        const azDeg = azCount === 1 ? 0 : -15 + 30 * ia / (azCount - 1);
+        const ray = traceRay(source, baseYaw, elevDeg, azDeg, ie, ia, elevCount, azCount);
+        row.push(ray);
+        rays.push(ray);
+      }
+      rays2D.push(row);
+    }
+    const tube = annotateTubeTL(rays2D, elevCount, azCount);
+    const closest = closestRayAnalysis(rays, target);
+    let field = null, coveragePoints = [], insonifiedFraction = NaN, shadowFraction = NaN, tlRDb = closest.nearest.tlDb;
+    if (makeField) {
+      const f = computeField(rays);
+      field = f.field;
+      coveragePoints = buildCoveragePoints(field);
+      insonifiedFraction = f.insonifiedFraction;
+      shadowFraction = f.shadowFraction;
+      const gridTL = sampleNearestField(field, target);
+      if (closest.eigenrays.length) tlRDb = Math.min(...closest.eigenrays.map(e => e.tlDb));
+      else tlRDb = Math.max(gridTL, TL_CUTOFF);
+    } else {
+      insonifiedFraction = NaN;
+      shadowFraction = NaN;
+      tlRDb = closest.eigenrays.length ? Math.min(...closest.eigenrays.map(e => e.tlDb)) : closest.nearest.tlDb;
+    }
+    const computeMs = performance.now() - t0;
+    const rayPointCount = rays.reduce((sum, ray) => sum + ray.points.length, 0);
+    const fieldWork = makeField ? CANON.nx * CANON.ny * CANON.nz : 0;
+    const quotaWorkUnits = rayPointCount + fieldWork + coveragePoints.length;
+    if (options.countQuota !== false) {
+      state.traceQuotaUnits += quotaWorkUnits;
+      state.traceQuotaMs += computeMs;
+    }
+    return {
+      name: options.name || 'model', source, target, baseYaw, elevCount, azCount, rays2D, rays,
+      field, coveragePoints, maxTime: tube.maxTime, maxSnell: tube.maxSnell, maxPlane: tube.maxPlane,
+      nearest: closest.nearest, eigenrays: closest.eigenrays, reached: closest.eigenrays.length > 0,
+      tlRDb: clamp(tlRDb, 0, TL_MAX), insonifiedFraction, shadowFraction,
+      computeMs,
+      quotaWorkUnits,
+      convergence: null,
+      reciprocityErrorDb: null
+    };
+  }
+
+  function resize() {
+    state.dpr = Math.min(2, window.devicePixelRatio || 1);
+    state.w = Math.max(1, Math.floor(innerWidth));
+    state.h = Math.max(1, Math.floor(innerHeight));
+    canvas.width = Math.floor(state.w * state.dpr);
+    canvas.height = Math.floor(state.h * state.dpr);
+    ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+  }
+
+  function resetCamera() { state.yaw = -0.72; state.pitch = 0.48; state.zoom = 1.0; }
+
+  function worldToView(p) {
+    const x = (p.x / 1000) - 25;
+    const y = (p.y / 1000) - 12;
+    const z = ((1500 - p.z) / 1000) * VERT_EXAG;
+    const cy = Math.cos(state.yaw), sy = Math.sin(state.yaw);
+    const cp = Math.cos(state.pitch), sp = Math.sin(state.pitch);
+    const x1 = cy * x - sy * y;
+    const y1 = sy * x + cy * y;
+    const z1 = z;
+    const y2 = cp * y1 - sp * z1;
+    const z2 = sp * y1 + cp * z1;
+    return { x: x1, y: y2, z: z2 };
+  }
+
+  function project(p) {
+    const v = worldToView(p);
+    const dist = 72;
+    const denom = Math.max(12, dist + v.y);
+    const scale = 26 * state.zoom * dist / denom;
+    return { x: state.w * 0.52 + v.x * scale, y: state.h * 0.52 - v.z * scale, d: v.y, s: scale };
+  }
+
+  function drawGradientBackground() {
+    const g = ctx.createLinearGradient(0, 0, 0, state.h);
+    g.addColorStop(0, '#0b3c58');
+    g.addColorStop(0.23, '#061b35');
+    g.addColorStop(1, '#01040d');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, state.w, state.h);
+    const rg = ctx.createRadialGradient(state.w*0.52, state.h*0.18, 10, state.w*0.52, state.h*0.18, state.w*0.7);
+    rg.addColorStop(0, 'rgba(79,220,255,.16)');
+    rg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = rg;
+    ctx.fillRect(0,0,state.w,state.h);
+  }
+
+  function drawPoly(points, fill, stroke, alpha = 1) {
+    if (!points.length) return;
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+    ctx.closePath();
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.stroke(); }
+    ctx.restore();
+  }
+
+  function drawSurfacePlane() {
+    const corners = [
+      {x:0,y:0,z:0},{x:50000,y:0,z:0},{x:50000,y:24000,z:0},{x:0,y:24000,z:0}
+    ].map(project);
+    drawPoly(corners, 'rgba(123,232,255,.055)', 'rgba(159,237,255,.22)', 1);
+    // subtle surface grid
+    ctx.save();
+    ctx.strokeStyle = 'rgba(149,232,255,.08)'; ctx.lineWidth = 1;
+    for (let x = 0; x <= 50000; x += 10000) {
+      const a = project({x, y:0, z:0}), b = project({x, y:24000, z:0});
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    }
+    for (let y = 0; y <= 24000; y += 6000) {
+      const a = project({x:0, y, z:0}), b = project({x:50000, y, z:0});
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawBoundingBox() {
+    const C = [
+      {x:0,y:0,z:0}, {x:50000,y:0,z:0}, {x:50000,y:24000,z:0}, {x:0,y:24000,z:0},
+      {x:0,y:0,z:3000}, {x:50000,y:0,z:3000}, {x:50000,y:24000,z:3000}, {x:0,y:24000,z:3000}
+    ].map(project);
+    const edges = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+    ctx.save();
+    ctx.strokeStyle = 'rgba(183,236,255,.30)'; ctx.lineWidth = 1;
+    for (const [a,b] of edges) { ctx.beginPath(); ctx.moveTo(C[a].x,C[a].y); ctx.lineTo(C[b].x,C[b].y); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(226,247,255,.75)'; ctx.font = '11px ui-sans-serif, system-ui';
+    function label(text, p, dx=0, dy=0) { const q = project(p); ctx.fillText(text, q.x + dx, q.y + dy); }
+    label('x range (km)', {x:50000,y:0,z:0}, 8, -4);
+    label('y cross-range (km)', {x:0,y:24000,z:0}, 8, -4);
+    label('depth z (m)', {x:0,y:0,z:3000}, 8, 12);
+    for (let x=0; x<=50000; x+=10000) {
+      const a = project({x,y:0,z:3000}), b = project({x,y:0,z:0});
+      ctx.strokeStyle = 'rgba(183,236,255,.13)'; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+      const p = project({x,y:0,z:3000}); ctx.fillText(String(x/1000), p.x-4, p.y+13);
+    }
+    for (let y=0; y<=24000; y+=6000) { const p = project({x:0,y,z:3000}); ctx.fillText(String(y/1000), p.x-7, p.y+12); }
+    for (let z=0; z<=3000; z+=1000) { const p = project({x:0,y:0,z}); ctx.fillText(String(z), p.x-30, p.y+3); }
+    ctx.restore();
+  }
+
+  function drawBathymetry() {
+    const cells = state.bathyMesh.map(cell => {
+      const pp = cell.pts.map(project);
+      return { cell, pp, depth: pp.reduce((a,p)=>a+p.d,0)/pp.length };
+    }).sort((a,b) => b.depth - a.depth);
+    ctx.save();
+    for (const item of cells) {
+      const s = item.cell.shade;
+      const r = Math.round(99 + 68*s), g = Math.round(88 + 52*s), b = Math.round(54 + 34*s);
+      drawPoly(item.pp, `rgba(${r},${g},${b},.92)`, 'rgba(255,226,151,.075)', 1);
+    }
+    ctx.restore();
+    const p1 = project({x:18000,y:12000,z:bathymetry(18000,12000)});
+    const p2 = project({x:34000,y:9000,z:bathymetry(34000,9000)});
+    ctx.save(); ctx.font = '12px ui-sans-serif, system-ui'; ctx.fillStyle = 'rgba(255,231,168,.88)';
+    ctx.fillText('seabed / seamount', p1.x + 8, p1.y - 8);
+    ctx.fillText('offset 3D seamount', p2.x + 8, p2.y - 8);
+    ctx.restore();
+  }
+
+  function tlColor(tl, alpha = 1) {
+    const u = clamp((tl - 82) / (TL_CUTOFF - 82), 0, 1);
+    const hue = lerp(188, 18, u);
+    const light = lerp(64, 56, u);
+    return hsl(hue, 94, light, alpha);
+  }
+
+  function drawCoverage(model) {
+    if (!model || !model.coveragePoints || !model.coveragePoints.length) return;
+    const opacity = Number(UI.opacitySlider.value) / 100;
+    if (opacity <= 0.001) return;
+    const pts = model.coveragePoints.map(p => ({ p, q: project(p) })).sort((a,b) => b.q.d - a.q.d);
+    const tlMode = UI.tlToggle.checked;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const item of pts) {
+      const q = item.q;
+      if (q.x < -30 || q.x > state.w + 30 || q.y < -30 || q.y > state.h + 30) continue;
+      const r = clamp(q.s * 0.035, 1.2, 4.2);
+      ctx.fillStyle = tlMode ? tlColor(item.p.tl, 0.08 + 0.22*opacity) : `rgba(90, 223, 255, ${0.05 + 0.20*opacity})`;
+      ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawColorbar() {
+    const w = 12, h = 120;
+    // Keep the TL bar above the bottom-right legend so the two guides never overlap.
+    const x = state.w - 84;
+    const y = state.w > 920 ? clamp(state.h - 395, 106, state.h - h - 34) : clamp(state.h - 190, 84, state.h - h - 24);
+    ctx.save();
+    const g = ctx.createLinearGradient(0, y, 0, y+h);
+    for (let i=0;i<=1;i+=0.1) g.addColorStop(i, tlColor(lerp(82, TL_CUTOFF, i), 1));
+    ctx.fillStyle = 'rgba(0,0,0,.32)'; ctx.fillRect(x-10,y-18,72,h+44);
+    ctx.fillStyle = g; ctx.fillRect(x,y,w,h);
+    ctx.strokeStyle = 'rgba(255,255,255,.24)'; ctx.strokeRect(x,y,w,h);
+    ctx.fillStyle = 'rgba(226,247,255,.74)'; ctx.font = '10px ui-sans-serif, system-ui';
+    ctx.fillText('TL dB', x+18, y-6); ctx.fillText('82', x+18, y+8); ctx.fillText(String(TL_CUTOFF), x+18, y+h);
+    ctx.restore();
+  }
+
+  function visibleRayEndIndex(points, time) {
+    let lo = 0, hi = points.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (points[mid].t <= time) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+  }
+
+  function visibleRayStartIndex(points, time) {
+    let lo = 0, hi = points.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (points[mid].t < time) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+  }
+
+  function strokeRayPolyline(ray, start, end, pointStride) {
+    if (end <= start) return 0;
+    ctx.beginPath();
+    let started = false;
+    let segments = 0;
+    for (let i = start; i <= end; i += pointStride) {
+      const q = project(ray.points[i]);
+      if (!started) { ctx.moveTo(q.x, q.y); started = true; }
+      else { ctx.lineTo(q.x, q.y); segments++; }
+    }
+    if ((end - start) % pointStride !== 0) {
+      const q = project(ray.points[end]);
+      if (!started) ctx.moveTo(q.x, q.y);
+      else { ctx.lineTo(q.x, q.y); segments++; }
+    }
+    ctx.stroke();
+    state.renderQuotaSegments += segments;
+    return segments;
+  }
+
+  function drawRays(model) {
+    if (!model) return;
+    const time = state.animTime;
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    // X-ray overlay: draw rays after the seabed and use lighter blending so camera
+    // rotations do not visually bury the pink/magenta launch fan under bathymetry.
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.shadowColor = 'rgba(255, 92, 150, .24)';
+    ctx.shadowBlur = 3;
+
+    // Performance note: drawing the full accumulated path for all 1271 rays can exceed
+    // 200k line segments per frame and stalls Safari/Chrome canvases. Instead, draw a
+    // sparse persistent history plus a brighter recent trail around the moving wavefront.
+    // The traced rays and TL field are unchanged; this only reduces per-frame rendering work.
+    const dense = model.rays.length > 1800;
+    const historyEvery = dense ? 9 : 3;
+    const historyStride = dense ? 12 : 9;
+    const brightEvery = dense ? 6 : 2;
+    const brightStride = dense ? 5 : 4;
+    const trailSeconds = state.playing ? 5.5 : 8.0;
+
+    // Faint accumulated history: enough to read the ray fan without redrawing every point.
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 0.72;
+    for (let ri = 0; ri < model.rays.length; ri += historyEvery) {
+      const ray = model.rays[ri];
+      const end = visibleRayEndIndex(ray.points, time);
+      if (end < 1) continue;
+      ctx.strokeStyle = ray.color.replace('1)', '0.16)');
+      strokeRayPolyline(ray, 0, end, historyStride);
+    }
+
+    // Bright moving wavefront / recent trail.
+    ctx.shadowBlur = 4;
+    for (let ri = 0; ri < model.rays.length; ri += brightEvery) {
+      const ray = model.rays[ri];
+      const end = visibleRayEndIndex(ray.points, time);
+      if (end < 1) continue;
+      const start = Math.max(0, visibleRayStartIndex(ray.points, Math.max(0, time - trailSeconds)) - 1);
+      ctx.strokeStyle = ray.color.replace('1)', '0.68)');
+      ctx.lineWidth = 1.3;
+      strokeRayPolyline(ray, start, end, brightStride);
+      const front = project(ray.points[end]);
+      ctx.fillStyle = ray.color.replace('1)', '0.86)');
+      ctx.beginPath(); ctx.arc(front.x, front.y, 2.05, 0, Math.PI*2); ctx.fill();
+    }
+    // Highlight eigenrays after they have arrived.
+    if (model.eigenrays.length) {
+      for (const e of model.eigenrays) {
+        const ray = e.ray;
+        const end = visibleRayEndIndex(ray.points, Math.min(time, e.t));
+        if (end < 1) continue;
+        ctx.strokeStyle = 'rgba(255,255,210,.92)'; ctx.lineWidth = 2.5;
+        ctx.shadowColor = '#fff6a0'; ctx.shadowBlur = 12;
+        ctx.beginPath();
+        for (let i=0; i<=end; i++) { const q = project(ray.points[i]); if (i===0) ctx.moveTo(q.x,q.y); else ctx.lineTo(q.x,q.y); }
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawGlowSphere(point, color, label, ringColor) {
+    const q = project(point);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const r = clamp(q.s * 0.13, 5, 11);
+    const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, r*4);
+    g.addColorStop(0, color.replace('1)', '.95)'));
+    g.addColorStop(.25, color.replace('1)', '.32)'));
+    g.addColorStop(1, color.replace('1)', '0)'));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, q.y, r*4, 0, Math.PI*2); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, Math.PI*2); ctx.fill();
+    if (ringColor) { ctx.strokeStyle = ringColor; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q.x, q.y, r+6, 0, Math.PI*2); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(237,250,255,.94)'; ctx.font = '700 13px ui-sans-serif, system-ui';
+    ctx.fillText(label, q.x + r + 8, q.y - r - 4);
+    ctx.restore();
+  }
+
+  function drawMarkers(model) {
+    drawGlowSphere(SRC, 'rgba(255,250,222,1)', 'S source (0 km, 12 km, 50 m)', null);
+    const ring = model && model.reached ? 'rgba(125,255,178,.98)' : 'rgba(255,91,110,.98)';
+    drawGlowSphere(RCV, 'rgba(120,234,255,1)', model && model.reached ? 'R reached' : 'R shadowed / unreached', ring);
+  }
+
+  function drawCrossSection(model) {
+    if (!model || !model.field) return;
+    const w = Math.min(470, state.w * 0.43), h = 190;
+    const x0 = 18, y0 = state.h - h - 18;
+    if (state.w < 900) return;
+    ctx.save();
+    ctx.fillStyle = 'rgba(1, 9, 20, .68)'; ctx.strokeStyle = 'rgba(161,226,255,.18)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(x0, y0, w, h, 16); ctx.fill(); ctx.stroke();
+    ctx.save(); ctx.beginPath(); ctx.rect(x0+12, y0+26, w-24, h-44); ctx.clip();
+    const px = x => x0 + 18 + (x / 50000) * (w - 42);
+    const pz = z => y0 + 30 + (z / 3000) * (h - 54);
+    const iy = Math.round((12000 - DOMAIN.y0) / GRID_DY);
+    // Coverage pixels on centerline.
+    for (let iz=0; iz<CANON.nz; iz++) {
+      for (let ix=0; ix<CANON.nx; ix++) {
+        const tl = model.field[idx3(ix,iy,iz)];
+        if (tl >= TL_CUTOFF) continue;
+        ctx.fillStyle = UI.tlToggle.checked ? tlColor(tl, .22) : 'rgba(89,220,255,.16)';
+        ctx.fillRect(px(state.xGrid[ix])-2, pz(state.zGrid[iz])-2, 5, 5);
+      }
+    }
+    // Centerline rays (azimuth close to 0).
+    ctx.lineWidth = 0.7;
+    for (const ray of model.rays) {
+      if (Math.abs(ray.azDeg) > 0.55) continue;
+      ctx.strokeStyle = ray.color.replace('1)', '0.55)'); ctx.beginPath();
+      let first = true; const end = visibleRayEndIndex(ray.points, state.animTime);
+      for (let i=0; i<=end; i++) {
+        const p = ray.points[i]; const x = px(p.x), z = pz(p.z);
+        if (first) { ctx.moveTo(x,z); first = false; } else ctx.lineTo(x,z);
+      }
+      ctx.stroke();
+    }
+    // Bottom profile.
+    ctx.beginPath();
+    for (let i=0; i<=160; i++) {
+      const x = 50000 * i / 160, z = bathymetry(x, 12000);
+      if (i===0) ctx.moveTo(px(x), pz(z)); else ctx.lineTo(px(x), pz(z));
+    }
+    ctx.lineTo(px(50000), pz(3000)); ctx.lineTo(px(0), pz(3000)); ctx.closePath();
+    ctx.fillStyle = 'rgba(151, 122, 68, .86)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,222,148,.72)'; ctx.stroke();
+    // S and projected R range/depth.
+    ctx.fillStyle = '#fff9d6'; ctx.beginPath(); ctx.arc(px(SRC.x), pz(SRC.z), 4, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = model.reached ? '#7dffb2' : '#ff5b6e'; ctx.beginPath(); ctx.arc(px(RCV.x), pz(RCV.z), 4, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = 'rgba(232,247,255,.82)'; ctx.font = '700 11px ui-sans-serif, system-ui'; ctx.fillText('Reference cross-section: y = 12 km centerline', x0+14, y0+17);
+    ctx.fillStyle = 'rgba(232,247,255,.58)'; ctx.font = '10px ui-sans-serif, system-ui'; ctx.fillText('x 0→50 km', x0+w-76, y0+h-9); ctx.fillText('z 0→3000 m', x0+14, y0+h-9);
+    ctx.restore();
+  }
+
+  function drawArrivals(model) {
+    const w = arrivalsCanvas.width, h = arrivalsCanvas.height;
+    arrivalsCtx.clearRect(0,0,w,h);
+    arrivalsCtx.fillStyle = 'rgba(1,9,20,.45)'; arrivalsCtx.fillRect(0,0,w,h);
+    arrivalsCtx.strokeStyle = 'rgba(210,242,255,.18)'; arrivalsCtx.beginPath(); arrivalsCtx.moveTo(24,h-16); arrivalsCtx.lineTo(w-10,h-16); arrivalsCtx.stroke();
+    arrivalsCtx.fillStyle = 'rgba(226,247,255,.64)'; arrivalsCtx.font = '10px ui-sans-serif, system-ui';
+    arrivalsCtx.fillText('arrivals: time vs amplitude/TL', 8, 12);
+    if (!model || !model.eigenrays.length) {
+      arrivalsCtx.fillStyle = 'rgba(255,118,136,.82)'; arrivalsCtx.fillText('No eigenrays within 400 m tolerance', 46, 42); return;
+    }
+    const arr = model.eigenrays.slice(0, 16);
+    const tMin = Math.min(...arr.map(a=>a.t)), tMax = Math.max(...arr.map(a=>a.t));
+    const tlMin = Math.min(...arr.map(a=>a.tlDb)), tlMax = Math.max(...arr.map(a=>a.tlDb));
+    for (const a of arr) {
+      const tx = (tMax === tMin) ? 0.5 : (a.t - tMin)/(tMax - tMin);
+      const amp = (tlMax === tlMin) ? 0.8 : 1 - (a.tlDb - tlMin)/(tlMax - tlMin);
+      const x = 28 + tx * (w - 48), y = h - 16 - (8 + amp * (h - 34));
+      arrivalsCtx.strokeStyle = 'rgba(255,250,180,.88)'; arrivalsCtx.beginPath(); arrivalsCtx.moveTo(x,h-16); arrivalsCtx.lineTo(x,y); arrivalsCtx.stroke();
+      arrivalsCtx.fillStyle = 'rgba(255,250,180,.95)'; arrivalsCtx.beginPath(); arrivalsCtx.arc(x,y,3,0,Math.PI*2); arrivalsCtx.fill();
+    }
+  }
+
+  function sessionQuotaKpi() {
+    const elapsedS = Math.max(0, (performance.now() - state.sessionStart) / 1000);
+    const renderKSegments = state.renderQuotaSegments / 1000;
+    const traceKWork = state.traceQuotaUnits / 1000;
+    const totalKWork = traceKWork + renderKSegments;
+    const fieldMB = state.current && state.current.field ? state.current.field.length * 4 / (1024 * 1024) : 0;
+    return { elapsedS, renderKSegments, traceKWork, totalKWork, fieldMB };
+  }
+
+  function drawCameraReadout() {
+    const yawDeg = ((((state.yaw / RAD) + 180) % 360) + 360) % 360 - 180;
+    const pitchDeg = state.pitch / RAD;
+    const text = `camera yaw ${yawDeg.toFixed(1)}° · pitch ${pitchDeg.toFixed(1)}° · zoom ${state.zoom.toFixed(2)}×`;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.font = '500 11px ui-sans-serif, system-ui';
+    ctx.fillStyle = 'rgba(225, 245, 255, .28)';
+    ctx.fillText(text, state.w * 0.5, 48);
+    ctx.restore();
+  }
+
+  function metricHTML(model) {
+    if (!model) return '';
+    const eig = model.eigenrays.length;
+    const arrivals = eig ? model.eigenrays.slice(0,4).map(e => `${fmt(e.t,2)}s/${fmt(e.tlDb,1)}dB`).join(' · ') + (eig>4 ? ' …' : '') : 'none';
+    const conv = state.canonical && state.canonical.convergence ? state.canonical.convergence : null;
+    const rec = state.canonical && state.canonical.reciprocityErrorDb != null ? state.canonical.reciprocityErrorDb : NaN;
+    const rayCount = `${model.elevCount} × ${model.azCount} = ${model.rays.length}`;
+    const quota = sessionQuotaKpi();
+    return `
+      <div class="metricItem quotaKpi wide"><div class="k">Session quota KPI</div><div class="v">${fmt(quota.totalKWork,1)} kWU · ${fmt(quota.elapsedS,0)}s</div><div class="sub">viz quota: trace ${fmt(quota.traceKWork,0)}kWU · render ${fmt(quota.renderKSegments,0)}kSeg · field ${fmt(quota.fieldMB,1)}MB</div></div>
+      <div class="metricItem"><div class="k">Reachability</div><div class="v">${model.reached ? 'yes' : 'no'} · miss ${fmt(model.nearest.dist,0)} m</div></div>
+      <div class="metricItem"><div class="k">TL(R)</div><div class="v">${fmt(model.tlRDb,1)} dB</div></div>
+      <div class="metricItem"><div class="k">Insonified</div><div class="v">${fmt(model.insonifiedFraction*100,1)}%</div></div>
+      <div class="metricItem"><div class="k">Shadow</div><div class="v">${fmt(model.shadowFraction*100,1)}%</div></div>
+      <div class="metricItem"><div class="k">3D deflection</div><div class="v">${fmt(model.maxPlane,0)} m Δy-plane</div></div>
+      <div class="metricItem"><div class="k">Snell drift</div><div class="v">${model.maxSnell.toExponential(2)}</div></div>
+      <div class="metricItem"><div class="k">Performance</div><div class="v">${fmt(state.fps,0)} FPS · ${fmt(state.fileKB,0)} KB</div></div>
+      <div class="metricItem"><div class="k">Ray count</div><div class="v">${rayCount}</div></div>
+      <div class="metricItem wide"><div class="k">Eigenrays / arrivals</div><div class="v">${eig} within ${EIGEN_TOL_M} m · ${arrivals}</div></div>
+      <div class="metricItem"><div class="k">Reciprocity</div><div class="v">${Number.isFinite(rec) ? fmt(rec,2)+' dB' : 'computing…'}</div></div>
+      <div class="metricItem"><div class="k">2× convergence</div><div class="v">${conv ? `Δcov ${fmt(conv.coverageDeltaPct,2)} pp · ΔTL ${fmt(conv.tlDeltaDb,2)} dB` : 'computing…'}</div></div>
+    `;
+  }
+
+  function updateMetrics() {
+    const model = state.current;
+    if (!model) return;
+    UI.metricsPanel.querySelector('h2').textContent = state.offCanonical ? 'Metrics (off-canonical controls)' : 'Canonical metrics';
+    UI.badgeRow.innerHTML = '';
+    const b1 = document.createElement('span'); b1.className = 'badge ' + (model.reached ? 'ok':'bad'); b1.textContent = model.reached ? 'R reached' : 'R unreached'; UI.badgeRow.appendChild(b1);
+    const b2 = document.createElement('span'); b2.className = 'badge ' + (state.offCanonical ? 'warn':'ok'); b2.textContent = state.offCanonical ? 'off-canonical' : 'canonical 41×31'; UI.badgeRow.appendChild(b2);
+    const b3 = document.createElement('span'); b3.className = 'badge'; b3.textContent = `TL shadow cutoff ${TL_CUTOFF} dB`; UI.badgeRow.appendChild(b3);
+    UI.metricGrid.innerHTML = metricHTML(model);
+    drawArrivals(model);
+  }
+
+  function postCanonicalMetrics() {
+    const m = state.canonical;
+    if (!m || !m.field) return;
+    const quota = sessionQuotaKpi();
+    const payload = {
+      type: 'ray_metrics',
+      model: 'vanilla-js-geometric-ray-tube',
+      canonical: true,
+      gridShape: [CANON.nx, CANON.ny, CANON.nz],
+      rowMajor: 'x-fastest',
+      tlGridDb: m.field,
+      tlFieldSampleCount: m.field.length,
+      shadowCutoffDb: TL_CUTOFF,
+      rayCount: m.rays.length,
+      elevationBeams: m.elevCount,
+      azimuthBeams: m.azCount,
+      receiverReached: m.reached,
+      nearestRayMissM: m.nearest.dist,
+      tlRDb: m.tlRDb,
+      insonifiedFraction: m.insonifiedFraction,
+      shadowFraction: m.shadowFraction,
+      maxOutOfPlaneDeflectionM: m.maxPlane,
+      maxSnellInvariantDrift: m.maxSnell,
+      eigenrayCount: m.eigenrays.length,
+      eigenrays: m.eigenrays.map(e => ({ timeS: e.t, tlDb: e.tlDb, missM: e.dist })),
+      reciprocityErrorDb: m.reciprocityErrorDb,
+      convergence: m.convergence,
+      fps: state.fps,
+      fileSizeKB: state.fileKB,
+      sessionQuota: {
+        kind: 'visualization_work_units',
+        totalKWorkUnits: quota.totalKWork,
+        traceKWorkUnits: quota.traceKWork,
+        renderKSegments: quota.renderKSegments,
+        elapsedS: quota.elapsedS,
+        frameCount: state.frameCount,
+        note: 'Browser page cannot read Codex/API/token quota; this is in-frame visualization workload.'
+      },
+      assumptions: { stepM: STEP_M, maxArcM: MAX_ARC_M, bottomLossDb: BOTTOM_LOSS_DB, eigenToleranceM: EIGEN_TOL_M, coverageKernelM: KERNEL }
+    };
+    try { window.parent.postMessage(payload, '*'); } catch (err) { /* iframe parent may reject structured clone in old browsers */ }
+  }
+
+  function drawScene(now) {
+    const dt = Math.min(0.1, (now - state.lastFrame) / 1000);
+    state.lastFrame = now;
+    state.frameCount++;
+    state.fps = state.fps ? lerp(state.fps, 1 / Math.max(1e-4, dt), 0.06) : 1 / Math.max(1e-4, dt);
+    if (state.playing && state.current) {
+      state.animTime += dt * state.speed;
+      if (state.animTime >= state.current.maxTime) { state.animTime = state.current.maxTime; state.playing = false; UI.playBtn.textContent = 'Play'; }
+      UI.timeSlider.value = String(state.animTime);
+      UI.timeVal.textContent = `${state.animTime.toFixed(1)} s`;
+    }
+
+    drawGradientBackground();
+    drawSurfacePlane();
+    drawCoverage(state.current);
+    drawBathymetry();
+    drawRays(state.current);
+    drawBoundingBox();
+    drawMarkers(state.current);
+    drawCrossSection(state.current);
+    drawCameraReadout();
+    if (UI.tlToggle.checked) drawColorbar();
+
+    if (Math.floor(now/500) !== Math.floor((now-16)/500)) updateMetrics();
+    requestAnimationFrame(drawScene);
+  }
+
+  function syncControlsWithModel(model) {
+    UI.timeSlider.max = model ? String(model.maxTime) : '60';
+    if (state.animTime > Number(UI.timeSlider.max)) state.animTime = Number(UI.timeSlider.max);
+    UI.timeSlider.value = String(state.animTime);
+    UI.timeVal.textContent = `${state.animTime.toFixed(1)} s`;
+    UI.elevVal.textContent = UI.elevSlider.value;
+    UI.azVal.textContent = UI.azSlider.value;
+    UI.speedVal.textContent = `${Number(UI.speedSlider.value).toFixed(1)}×`;
+    UI.opacityVal.textContent = `${UI.opacitySlider.value}%`;
+  }
+
+  let recomputeTimer = null;
+  function scheduleRecompute() {
+    UI.elevVal.textContent = UI.elevSlider.value;
+    UI.azVal.textContent = UI.azSlider.value;
+    const elev = Number(UI.elevSlider.value), az = Number(UI.azSlider.value);
+    state.offCanonical = elev !== CANON.elev || az !== CANON.az;
+    if (!state.offCanonical && state.canonical) {
+      state.current = state.canonical;
+      state.animTime = Math.min(state.animTime, state.current.maxTime);
+      syncControlsWithModel(state.current); updateMetrics(); postCanonicalMetrics(); return;
+    }
+    clearTimeout(recomputeTimer);
+    recomputeTimer = setTimeout(() => {
+      state.computing = true;
+      setStatus(`Tracing off-canonical ${elev}×${az} fan…`);
+      setTimeout(() => {
+        const m = computeModel(elev, az, { name: 'off-canonical', makeField: true, source: SRC, target: RCV, baseYaw: 0 });
+        state.current = m;
+        state.computing = false;
+        state.animTime = Math.min(state.animTime, m.maxTime);
+        syncControlsWithModel(m);
+        updateMetrics();
+        setStatus(`Off-canonical ${m.rays.length} rays ready in ${(m.computeMs/1000).toFixed(1)} s. Metric card flagged off-canonical.`);
+      }, 30);
+    }, 360);
+  }
+
+  function setupEvents() {
+    window.addEventListener('resize', resize);
+    UI.focusBtn.addEventListener('click', () => {
+      const on = document.body.classList.toggle('ui-minimized');
+      UI.focusBtn.textContent = on ? 'Show UI' : 'Focus view';
+    });
+    UI.slidersCollapseBtn.addEventListener('click', () => {
+      const on = document.body.classList.toggle('controls-collapsed');
+      UI.slidersCollapseBtn.textContent = on ? 'Show sliders' : 'Hide sliders';
+    });
+    UI.metricsCollapseBtn.addEventListener('click', () => {
+      const on = document.body.classList.toggle('metrics-collapsed');
+      UI.metricsCollapseBtn.textContent = on ? 'Expand' : 'Minimize';
+    });
+    UI.playBtn.addEventListener('click', () => { if (!state.current) return; state.playing = !state.playing; UI.playBtn.textContent = state.playing ? 'Pause' : 'Play'; });
+    UI.resetBtn.addEventListener('click', () => { state.playing = false; state.animTime = 0; UI.playBtn.textContent='Play'; syncControlsWithModel(state.current); });
+    UI.cameraBtn.addEventListener('click', resetCamera);
+    UI.canonicalBtn.addEventListener('click', () => { UI.elevSlider.value = String(CANON.elev); UI.azSlider.value = String(CANON.az); state.offCanonical = false; state.current = state.canonical || state.current; state.animTime = 0; state.playing = false; UI.playBtn.textContent='Play'; syncControlsWithModel(state.current); updateMetrics(); setStatus('Canonical controls restored.'); postCanonicalMetrics(); });
+    UI.elevSlider.addEventListener('input', scheduleRecompute);
+    UI.azSlider.addEventListener('input', scheduleRecompute);
+    UI.timeSlider.addEventListener('input', () => { state.animTime = Number(UI.timeSlider.value); UI.timeVal.textContent = `${state.animTime.toFixed(1)} s`; });
+    UI.speedSlider.addEventListener('input', () => { state.speed = Number(UI.speedSlider.value); UI.speedVal.textContent = `${state.speed.toFixed(1)}×`; });
+    UI.opacitySlider.addEventListener('input', () => { UI.opacityVal.textContent = `${UI.opacitySlider.value}%`; });
+    canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); state.pointer = { id:e.pointerId, x:e.clientX, y:e.clientY, yaw:state.yaw, pitch:state.pitch }; });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!state.pointer || state.pointer.id !== e.pointerId) return;
+      const dx = e.clientX - state.pointer.x, dy = e.clientY - state.pointer.y;
+      state.yaw = state.pointer.yaw + dx * 0.008;
+      state.pitch = clamp(state.pointer.pitch + dy * 0.006, -1.12, 1.12);
+    });
+    canvas.addEventListener('pointerup', (e) => { if (state.pointer && state.pointer.id === e.pointerId) state.pointer = null; });
+    canvas.addEventListener('wheel', (e) => { e.preventDefault(); state.zoom = clamp(state.zoom * Math.exp(-e.deltaY * 0.0012), 0.48, 2.6); }, { passive: false });
+  }
+
+  function runSelfChecksAsync() {
+    setStatus('Running reciprocity self-check (S/R swapped)…');
+    setTimeout(() => {
+      state.reverse = computeModel(CANON.elev, CANON.az, { name: 'reverse', makeField: false, source: RCV, target: SRC, baseYaw: Math.PI });
+      state.canonical.reciprocityErrorDb = Math.abs(state.canonical.tlRDb - state.reverse.tlRDb);
+      updateMetrics(); postCanonicalMetrics();
+      setStatus('Running 2× convergence self-check (82×62 beams)…');
+      setTimeout(() => {
+        const hi = computeModel(CANON.hiElev, CANON.hiAz, { name: '2x-convergence', makeField: true, source: SRC, target: RCV, baseYaw: 0 });
+        state.convergence = hi;
+        state.canonical.convergence = {
+          elevBeams: CANON.hiElev,
+          azimuthBeams: CANON.hiAz,
+          rayCount: hi.rays.length,
+          insonifiedFraction2x: hi.insonifiedFraction,
+          tlRDb2x: hi.tlRDb,
+          coverageDeltaPct: (hi.insonifiedFraction - state.canonical.insonifiedFraction) * 100,
+          tlDeltaDb: hi.tlRDb - state.canonical.tlRDb
+        };
+        updateMetrics(); postCanonicalMetrics();
+        setStatus(`Canonical ready. Reciprocity ${state.canonical.reciprocityErrorDb.toFixed(2)} dB; 2× Δcoverage ${state.canonical.convergence.coverageDeltaPct.toFixed(2)} pp.`);
+      }, 40);
+    }, 40);
+  }
+
+  function boot() {
+    resize(); initWaterMask(); buildBathyMesh(); setupEvents(); syncControlsWithModel(null);
+    state.fileKB = new Blob([document.documentElement.outerHTML]).size / 1024;
+    requestAnimationFrame(drawScene);
+    setStatus('Tracing canonical 41×31 fan and static TL mask…');
+    setTimeout(() => {
+      state.canonical = computeModel(CANON.elev, CANON.az, { name: 'canonical', makeField: true, source: SRC, target: RCV, baseYaw: 0 });
+      state.current = state.canonical;
+      state.offCanonical = false;
+      state.animTime = 0;
+      syncControlsWithModel(state.current);
+      updateMetrics(); postCanonicalMetrics();
+      setStatus(`Canonical ${state.canonical.rays.length} rays ready in ${(state.canonical.computeMs/1000).toFixed(1)} s. Press Play to emit wavefront.`);
+      runSelfChecksAsync();
+    }, 60);
+  }
+
+  if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r) {
+      r = Math.min(r, w/2, h/2); this.moveTo(x+r,y); this.arcTo(x+w,y,x+w,y+h,r); this.arcTo(x+w,y+h,x,y+h,r); this.arcTo(x,y+h,x,y,r); this.arcTo(x,y,x+w,y,r); return this;
+    };
+  }
+
+  window.__ray_view = { state, computeModel, bathymetry, soundSpeed };
+  boot();
+})();
+</script>
+</body>
+</html>
