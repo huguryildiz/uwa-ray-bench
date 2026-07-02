@@ -15,5 +15,8 @@ __pycache__/
 output/
 AGENTS.md
 
+# Original unmodified model outputs (local reference only)
+models/orig/
+
 # Reference data is shipped (55 MB of .bin + manifest) — KEEP it tracked.
 # If it ever grows past GitHub limits, move reference/data/ to Git LFS.

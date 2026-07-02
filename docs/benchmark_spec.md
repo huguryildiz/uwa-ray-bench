@@ -236,45 +236,8 @@ it is not mistaken for a model output.
 
 With the BELLHOP3D reference in place this task now HAS a quantitative anchor.
 Scoring is deliberately **not** collapsed into one weighted number. It separates
-three questions — field fidelity, coverage fidelity, geometry fidelity — and
-reports a numerical self-check status alongside them. `harness/scoring.js` is the
-implementation; this section is its source of truth.
-
-### Validation status (informational, not a ranking gate)
-
-Every model gets a `Qualified` / `Provisional` / `Invalid` status, computed from
-its own self-reported numerical self-checks:
-
-```text
-Hard invalid:
-  - malformed metrics payload (no usable TL array)
-  - incomplete canonical-grid coverage (TL array shorter than 101*49*31)
-  - NaN/Inf anywhere in the canonical TL field
-  - reciprocity_error present AND > 3 dB   ("failed hard numerical check")
-  - convergence_TL_R_delta present AND > 5 dB ("failed hard numerical check")
-
-Provisional:
-  - reciprocity_error absent (not yet supported by that panel)
-  - convergence_TL_R_delta absent (not yet supported by that panel)
-
-Qualified:
-  - finite, complete canonical TL data
-  - reciprocity_error <= 3 dB
-  - convergence_TL_R_delta <= 5 dB
-```
-
-**Project decision:** Validation status is reported for every model, on every
-row of the scorecard, but it does **not** gate eligibility for Field / Coverage
-/ Geometry / Composite leadership — every canonical model can lead a column,
-Validation status shown alongside so a strong number is always readable in
-context (a first version of this scheme did gate eligibility on `Qualified`
-only; with the model roster of the day, that emptied the ranking entirely — 3 of
-5 panels don't yet report reciprocity/convergence, one fails its own
-self-consistency caps, and one has NaN in its TL field — which defeated the
-comparison's purpose. NaN/incomplete-grid cells still degrade gracefully to the
-120 dB shadow value inside `scoreModel()` regardless of this decision, so a
-malformed TL field cannot silently produce a garbage score even though it isn't
-excluded from ranking).
+three questions — field fidelity, coverage fidelity, geometry fidelity.
+`harness/scoring.js` is the implementation; this section is its source of truth.
 
 ### Field Fidelity (TL field accuracy)
 
@@ -330,20 +293,19 @@ deflection magnitude — a model cannot score well here merely by producing a la
 out-of-plane number. Shown as "not yet scored" if either side's |Δy| is
 unavailable.
 
-### Composite Benchmark Score (secondary, informational Validation status)
+### Composite Benchmark Score (secondary)
 
 ```text
 E_total = 0.60*E_field + 0.20*E_coverage + 0.20*E_geometry
 Composite = 100 * (1 - clamp(E_total, 0, 1))
 ```
 
-Computed for every canonical model, regardless of Validation status. If Geometry
-is unavailable for a given model, its weight re-normalizes across the remaining
-dimensions and the result is marked **provisional composite** (a data-
-availability flag, distinct from the Validation status). The Composite is a
-convenience summary, not the scientific result — Field, Coverage, and Geometry
-each publish their own leader, and the UI never presents Composite as the only
-outcome, and always shows each row's Validation status beside it.
+Computed for every canonical model. If Geometry is unavailable for a given
+model, its weight re-normalizes across the remaining dimensions and the result
+is marked **provisional composite** (a data-availability flag). The Composite
+is a convenience summary, not the scientific result — Field, Coverage, and
+Geometry each publish their own leader, and the UI never presents Composite as
+the only outcome.
 
 ### Deterministic tie-break
 
@@ -365,8 +327,8 @@ silently decide close calls.
 
 ```text
 TL_ERR_CAP    = 25 dB   — normalizes E_core / E_smooth / E_recv into [0,1]
-RECIP_CAP     =  3 dB   — reciprocity qualification threshold
-CONV_CAP      =  5 dB   — convergence ΔTL(R) qualification threshold
+RECIP_CAP     =  3 dB   — reciprocity threshold
+CONV_CAP      =  5 dB   — convergence ΔTL(R) threshold
 WINSOR_CAP_DB = 20 dB   — |residual| clip before squaring, in E_core
 OOP_EPS_M     = 500 m   — floor on the Geometry Fidelity error denominator
 CELL_KM       = 0.5 km  — x/y grid pitch for the boundary-distance conversion
@@ -492,8 +454,8 @@ Harness-only features (built once by the harness, NOT required of the model file
 - **Diff overlay (model − BELLHOP3D):** a per-cell TL-error volume on the shared
   canonical grid, colour-mapped (e.g. blue = under, red = over), so where each
   model deviates from the reference is visible at a glance.
-- **Final scorecard / ranking:** one table aggregating every model's Validation
-  status, Field/Coverage/Geometry Fidelity, Composite, core err, TL(R) error,
+- **Final scorecard / ranking:** one table aggregating every model's
+  Field/Coverage/Geometry Fidelity, Composite, core err, TL(R) error,
   reciprocity error, convergence delta, coverage, and 3D-fidelity numbers,
   ranking the models against the reference per the Scoring note above (no single
   weighted leader score — see Migration note).

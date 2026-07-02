@@ -132,3 +132,10 @@ exported numbers.
   `tools/perf_baseline.json`) without opening any model panel. Defaults to a real
   GPU window, not `--headless`, because the reference panel's TL decode is
   compositor-gated and never renders under `--headless=new`.
+
+## TODO
+
+- README.md Architecture ASCII diagram (~line 126): the `Fable UI` box label
+  reads `(5)` but every other mention in the doc says `Fable 5 (Max)` — update
+  the box to `(5 Max)` and re-pad that column so the box-drawing borders stay
+  aligned.
