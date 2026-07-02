@@ -1,12 +1,12 @@
-# Underwater Acoustic Ray-Propagation Benchmark (3D) — Model Prompt
+# Underwater Acoustic Ray-Propagation Benchmark (3D) — Benchmark Spec
 
-**Purpose:** Four-way model comparison — Fugu Ultra vs Opus 4.8 (max reasoning
-effort) vs GPT 5.5 (Extra High) vs Gemini 3.1 Pro High, all scored
-against a BELLHOP3D reference (ground truth). The same prompt goes to all four LLMs;
+**Purpose:** Five-way model comparison — Fugu Ultra vs Opus 4.8 (max reasoning
+effort) vs GPT 5.5 (Extra High) vs Gemini 3.1 Pro High vs Fable 5 Max, all scored
+against a BELLHOP3D reference (ground truth). The same prompt goes to all five LLMs;
 each produces a self-contained `ray_view.html` that drops into the comparison
-harness as an isolated `<iframe>`. The BELLHOP3D reference is precomputed offline
-and rendered by the same engine in a fifth `<iframe>`, giving the otherwise
-qualitative task a quantitative anchor (TL RMSE vs Bellhop on a shared grid).
+harness as an opaque, isolated `<iframe>`. The BELLHOP3D reference is precomputed
+offline and rendered in its own sixth `<iframe>`, giving the otherwise qualitative
+task a quantitative anchor (TL RMSE vs Bellhop on a shared grid).
 
 **Crux:** continuous refraction per the sound-speed profile (NOT straight-line
 rays) + correct seabed reflection off 3D sloped terrain, producing both the
@@ -83,7 +83,7 @@ PHYSICS — MANDATORY (this is the crux; do not shortcut it)
   so values stay finite. The shadow threshold MUST be defined in terms of TL
   (e.g. a voxel is "shadow" if TL exceeds a stated dB cutoff); state the cutoff.
 
-CANONICAL CONFIG (the scored operating point — identical for all three panels)
+CANONICAL CONFIG (the scored operating point — identical for all model panels)
 - Launch fan: elevation -20 to +20 deg with 41 beams (1 deg step); azimuth -15 to
   +15 deg with 31 beams (1 deg step) => 1271 rays. This is the canonical fan.
 - Seabed half-space: c = 1600 m/s, rho = 1.8 g/cc, alpha = 0.5 dB/lambda.
@@ -152,13 +152,13 @@ ANIMATION & RENDERING
   opacity. The beam sliders may move off canonical for exploration, but doing so
   flags the metric card "off-canonical" (see CANONICAL CONFIG). Do NOT expose
   sliders that change the scenario itself (sound-speed profile, bathymetry, S/R
-  positions, launch-angle limits): those stay fixed so the three panels remain
+  positions, launch-angle limits): those stay fixed so the model panels remain
   directly comparable.
 
 - METRICS PANEL: render a compact card in a corner showing this model's own
   computed metrics, and also send them to the parent via
   window.parent.postMessage({type:'ray_metrics', ...}, '*') so the harness can lay
-  the three cards side by side (postMessage only — no network). Report:
+  the model cards side by side (postMessage only — no network). Report:
   * Reachability: is R reached (yes/no) + nearest-ray miss distance to R (m) + TL(R) in dB
   * Coverage: insonified voxel fraction (%) and shadow fraction (%)
   * 3D fidelity: max out-of-plane deflection of any ray |Δy| from its launch
@@ -215,39 +215,62 @@ HARD CONSTRAINTS (so it drops into a comparison harness)
 
 ## Reference panel (BELLHOP3D — ground truth)
 
-The third `<iframe>` is NOT a language model. It shows a BELLHOP3D reference run
-on the IDENTICAL scenario (same c(z), D(x,y), S, R, launch fan). Because Bellhop
-cannot run in the browser, produce it offline and export to a JSON file both the
-3D ray paths and the TL field on the CANONICAL COMPARISON GRID (101 x 49 x 31,
-dB, x-fastest). The third iframe loads that JSON and draws it with the SAME
-renderer the models use, so all three panels share one visual language and the
-Bellhop TL grid can be diffed cell-for-cell against each model's exported field.
-Prerequisite: genuine BELLHOP3D (acoustics toolbox) installed locally; the
-harness ships the precomputed JSON, not a live solver. NOTE: an Nx2D approach
-(trace 2D in the source->R plane then rotate in azimuth — what many tools do) is
-NOT sufficient here, because each radial is an independent 2D plane and cannot
-reflect a ray out of plane. The off-centerline seamount (y = 9 km) requires a
-true 3D bottom-reflection solve so the reference actually exhibits the out-of-
-plane deflection the models are judged on. Label this panel clearly as the
-reference so it is not mistaken for a model output.
+The reference `<iframe>` is NOT a language model. It shows a BELLHOP3D reference
+run on the IDENTICAL scenario (same c(z), D(x,y), S, R, launch fan). Because
+Bellhop cannot run in the browser, produce it offline and ship one binary file per
+snap-grid stop (`reference/data/<elev>x<azim>.bin`) plus `manifest.json`. Each
+binary contains the 3D ray paths and the TL field on the 101 x 49 x 31 comparison
+grid (dB, x-fastest). The reference panel lazy-fetches the active stop and draws it
+with the shared reference/harness renderer; it does not inject that renderer into
+model panels, which remain opaque self-contained submissions. Prerequisite:
+genuine BELLHOP3D (acoustics toolbox) installed locally; the harness ships the
+precomputed binaries, not a live solver. NOTE: an Nx2D approach (trace 2D in the
+source->R plane then rotate in azimuth — what many tools do) is NOT sufficient
+here, because each radial is an independent 2D plane and cannot reflect a ray out
+of plane. The off-centerline seamount (y = 9 km) requires a true 3D
+bottom-reflection solve so the reference actually exhibits the out-of-plane
+deflection the models are judged on. Label this panel clearly as the reference so
+it is not mistaken for a model output.
 
 ## Scoring note
 
 With the BELLHOP3D reference in place this task now HAS a quantitative anchor:
-the harness computes each model's TL RMSE (dB) and TL(R) error versus Bellhop on
-the shared grid. Treat that as the primary score, but keep the consistency checks
-too — correctness is whether each model's 3D ray paths, local-slope reflections
+the harness computes each model's TL RMSE (dB), TL(R) error, shadow-mask error,
+and consistency errors versus Bellhop on the shared grid. The official leader is
+the lowest weighted physics score at the canonical 41 x 31 fan:
+
+```text
+T_shadow = 120 dB
+C = cells where TL_ref < T_shadow
+
+E_TL   = core_RMSE(clamp(TL_model, T_shadow) - TL_ref over C) / 25
+E_mask = 0.5 * (false_shadow_rate + false_light_rate)
+E_R    = min(abs(TL_R_model - TL_R_ref), 25) / 25
+E_cons = 0.5 * min(reciprocity_error / 3, 1)
+       + 0.5 * min(convergence_TL_R_delta / 5, 1)
+
+leader_score = 100 * (0.55*E_TL + 0.25*E_mask + 0.15*E_R + 0.05*E_cons)
+```
+
+Lower wins. `false_shadow_rate` is the fraction of BELLHOP-insonified cells the
+model marks as shadow; `false_light_rate` is the fraction of BELLHOP-shadow cells
+the model marks as lit. Scores within 2 points are treated as effectively tied;
+that tie is broken by whichever model's out-of-plane |Δy| is closest to the
+BELLHOP3D reference. FPS and visual polish remain reported quality signals, but
+they do not affect the scientific leader. Visual inspection remains useful but
+must not replace the physics-based checks.
+
+Correctness is whether each model's 3D ray paths, local-slope reflections
 (including out-of-plane deflection), and derived coverage mask are internally
 consistent with the stated profile and bathymetry AND track the reference. RMSE
 is most trustworthy where rays are dense and away from caustics; the geometric-
-spreading TL is approximate, so large isolated spikes near caustics are expected
-and should not dominate the score. Visual inspection remains useful but must not
-replace the physics-based checks. A useful sanity check: a purely
-refractive ray that never touches the seabed must stay in its launch vertical
-plane and trace the same path as the 2D problem (c depends only on z). The
-bathymetry is intentionally asymmetric in cross-range (seamount 2 offset to
-y = 9 km), so once seabed reflections matter the centerline no longer reduces to
-2D — out-of-plane deflection should appear downrange of the offset seamount.
+spreading TL is approximate, so large isolated spikes near caustics should not
+dominate the score. A useful sanity check: a purely refractive ray that never
+touches the seabed must stay in its launch vertical plane and trace the same path
+as the 2D problem (c depends only on z). The bathymetry is intentionally
+asymmetric in cross-range (seamount 2 offset to y = 9 km), so once seabed
+reflections matter the centerline no longer reduces to 2D — out-of-plane
+deflection should appear downrange of the offset seamount.
 
 ## Benchmark validity & scoring calibration (NOT part of the verbatim prompt)
 
@@ -262,11 +285,11 @@ guide whoever runs and scores it; they do NOT change the verbatim prompt.
 ### Known risks
 
 - **The headline discriminator (true 3D out-of-plane reflection) may not fire for
-  either model.** Genuine 3D reflection off the sloped seabed is what separates a
+  every model.** Genuine 3D reflection off the sloped seabed is what separates a
   real 3D solve from Nx2D — hard enough that it distinguishes BELLHOP3D itself from
-  Nx2D tools. If all three models collapse to in-plane / Nx2D in the browser, that axis
-  is dead for everyone and yields no discrimination. Do not let the whole score depend
-  on it.
+  Nx2D tools. If all five models collapse to in-plane / Nx2D in the browser, that
+  axis is dead for everyone and yields no discrimination. Do not let the whole
+  score depend on it.
 - **Single-shot over-scope.** Refraction + 3D reflection + TL ray-tube Jacobian +
   eigenrays + reciprocity + convergence + premium 3D render + sliders + postMessage,
   in one self-contained file with zero libraries, is a large surface. If the models
@@ -281,13 +304,14 @@ guide whoever runs and scores it; they do NOT change the verbatim prompt.
 
 ### De-risk mitigations (apply when scoring)
 
-1. **Tiered scoring — keep the core achievable, make out-of-plane a bonus axis.**
+1. **Tiered scoring — keep the core achievable, make out-of-plane a tiebreaker.**
    Weight the score on the *core* that a competent model can plausibly reach in one
-   shot — centerline refraction structure, coverage/shadow mask, and TL on the
-   shared grid away from caustics. Treat true 3D out-of-plane deflection (|Δy| off
-   the launch plane downrange of the y = 9 km seamount) as a **bonus / tiebreaker
-   axis**, reported separately, NOT as the dominant term. This prevents a both-fail
-   null result on the hardest axis from collapsing the whole comparison.
+   shot — TL agreement in BELLHOP-insonified cells, coverage/shadow-mask agreement,
+   receiver TL, and basic reciprocity/convergence consistency. Treat true 3D
+   out-of-plane deflection (|Δy| off the launch plane downrange of the y = 9 km
+   seamount) as a closeness-to-reference tiebreaker, NOT as the dominant term. This
+   prevents a both-fail null result on the hardest axis from collapsing the whole
+   comparison.
 2. **Validate the reference before trusting it.** Before using BELLHOP3D as judge,
    sanity-check it against a known case: a purely refractive ray that never touches
    the seabed must stay in its launch vertical plane and match the 2D solution
@@ -308,34 +332,49 @@ down the physics the prompt demands.
 
 ## Harness fit
 
-Five panels in a **4+1 layout** of isolated `<iframe>`s: four model panels in a
-top row (**Fugu Ultra** | **Opus 4.8 (max)** | **GPT 5.5 (Extra High)** |
-**Gemini 3.1 Pro High**) and the **BELLHOP3D reference** spanning the
-full bottom row — the fixed anchor each model is read against. Layout is a CSS
-grid in `harness/index.html`; the synced camera/beam-stop and scorecard span all
-five cells. The four model files are produced from the verbatim prompt; the
-reference panel renders the precomputed Bellhop JSON with the same engine. Each
-model file self-reports its metric card and pushes its numbers + canonical-grid
-TL field to the harness via `postMessage({type:'ray_metrics', ...})`; the harness
-aggregates the cards and computes each model's TL RMSE / TL(R) error against the
-Bellhop grid. Scenario parameters (profile, bathymetry, S/R, launch-angle limits)
-are identical across all four so only the models' physics and rendering differ.
+Six panels are available to the harness: five opaque model `<iframe>`s
+(**Fugu Ultra** | **Opus 4.8 (max)** | **GPT 5.5 (Extra High)** |
+**Gemini 3.1 Pro (High)** | **Fable 5 (Max)**) plus the **BELLHOP3D reference**. The
+harness no longer keeps all six WebGL panels live at once. `harness/harness.js`
+mounts iframes lazily, warms them sequentially to collect `ray_metrics`, caches
+the scorecard, and keeps at most two live GL panels in the active comparison view
+(selected model + reference). Cinema/overview shows one live leader/fallback panel
+with static posters for the rest; Scorecard and Physics do not require live model
+iframes. Layout and navigation live in `harness/index.html`.
+
+The five model files are produced from the verbatim prompt and remain opaque
+submissions. The reference panel renders precomputed Bellhop binary data with the
+shared reference/harness renderer. Each model file self-reports its metric card and
+pushes its numbers + canonical-grid TL field to the harness via
+`postMessage({type:'ray_metrics', ...})`; the harness aggregates the cards and
+computes each model's TL RMSE / TL(R) error against the Bellhop grid. Scenario
+parameters (profile, bathymetry, S/R, launch-angle limits) are identical across all
+five so only the models' physics and rendering differ.
 
 Harness-only features (built once by the harness, NOT required of the model files):
 
-- **Synchronized camera:** orbit/zoom on any one panel drives all three together,
-  so the three volumes are always viewed from the same angle for fair comparison.
-  (The model files must expose set/get camera pose via postMessage to allow this.)
+- **Single primary menu bar:** the harness chrome exposes four top-level modes only:
+  Cinema, Compare, Scorecard, and Physics. Cinema is the default gallery/preview
+  view; Compare owns the model-vs-reference view and its TL diff overlay control;
+  Scorecard owns ranking/metric comparison; Physics opens the BELLHOP3D equations
+  and scenario notes. There is no second tab strip.
+- **Synchronized camera:** orbit/zoom on one live panel can drive the currently
+  mounted comparison peer, so the model and reference volumes are viewed from the
+  same angle. The model files should expose set/get camera pose via `postMessage`.
 - **Diff overlay (model − BELLHOP3D):** a per-cell TL-error volume on the shared
   canonical grid, colour-mapped (e.g. blue = under, red = over), so where each
   model deviates from the reference is visible at a glance.
-- **Final scorecard / ranking:** one table aggregating every model's TL RMSE,
-  TL(R) error, reciprocity error, convergence delta, coverage, and 3D-fidelity
-  numbers, ranking the models against the reference.
+- **Final scorecard / ranking:** one table aggregating every model's weighted
+  leader score, TL RMSE, core RMSE, shadow-mask error, TL(R) error, reciprocity
+  error, convergence delta, coverage, and 3D-fidelity numbers, ranking the models
+  against the reference.
 - **Cursor readout tooltip:** hovering the focused panel shows depth, bathymetry
   D(x,y), and local sound speed c(z) at the cursor. The scenario is analytic, so
   the harness computes these directly from c(z) and D(x,y) using only the cursor's
   world position reported by the focused panel — no per-model data needed.
+- **Performance guard:** `tools/perf_check.mjs` drives a real Chrome DevTools
+  Protocol probe of the harness, tracks FPS/heap/live-iframe count, and compares
+  canonical scores against `tools/perf_baseline.json`.
 
 ## Run layout & orchestration (NOT part of the verbatim prompt)
 
@@ -343,11 +382,11 @@ This section is for whoever runs the benchmark — it MUST NOT be pasted into th
 model prompt. Each model still outputs exactly one file named `ray_view.html`;
 the folder it lands in is an orchestration concern the model never sees.
 
-**Why separate folders.** The three models receive the byte-identical prompt and
+**Why separate folders.** The five models receive the byte-identical prompt and
 each emit a file named `ray_view.html`. They must stay isolated — no model
 may see another's output, or the comparison is contaminated — and files of
 the same name cannot share a directory. So each model run gets its own working
-folder, and a neutral harness folder references all three panels at the end.
+folder, and a neutral harness folder references all model panels at the end.
 
 **Run each model OUTSIDE this repo — not in `models/fugu/` or `models/opus/`.**
 A model run launched inside this repository can see the repo root: `CLAUDE.md`, the
@@ -357,7 +396,7 @@ prompt." So:
 
 - Run each model in a **clean, isolated directory outside this repo**, containing
   only the verbatim prompt (nothing else). Then copy the resulting `ray_view.html`
-  into `models/fugu/` or `models/opus/`.
+  into the matching `models/<id>/` folder.
 - Fugu runs in **Codex**, whose instructions file is **`AGENTS.md`** (not
   `CLAUDE.md`). Do NOT place an `AGENTS.md` in this repo — Codex would read it and
   leak orchestration into the model. `CLAUDE.md` here is infra-side only and must
@@ -365,40 +404,47 @@ prompt." So:
 
 ```
 uwa-ray-bench/
-├── benchmark_spec.md   # single source of truth (the verbatim prompt)
+├── docs/
+│   ├── benchmark_spec.md              # single source of truth for benchmark rules
+│   └── model_prompt.md                 # byte-identical prompt handed to models
 │
 ├── models/
 │   ├── fugu/ray_view.html                # produced by Codex → Fugu Ultra (isolated)
 │   ├── opus/ray_view.html                # produced by a separate Opus 4.8 (max) chat (isolated)
 │   ├── gpt/ray_view.html                 # produced by a separate GPT 5.5 (Extra High) session (isolated)
-│   └── gemini/
-│       ├── prompt.md                     # verbatim prompt ready to paste into Gemini 2.5 Pro Deep Think
-│       └── ray_view.html                 # produced by a separate Gemini 3.1 Pro High session (isolated)
+│   ├── gemini/ray_view.html              # produced by a separate Gemini 3.1 Pro (High) session (isolated)
+│   └── fable/ray_view.html               # produced by a separate Fable 5 (Max) session (isolated)
 │
 ├── reference/
 │   ├── bellhop3d/
 │   │   ├── compute_reference.py          # offline BELLHOP3D run (acoustics toolbox)
-│   │   └── bellhop_reference.json        # precomputed: 3D ray paths + TL grid 101×49×31, dB, x-fastest
-│   └── ray_view_reference.html           # draws the JSON with the SAME renderer the models use
+│   │   └── _run/                         # local Bellhop scratch files (not shipped)
+│   ├── data/
+│   │   ├── manifest.json                 # snap-grid metadata
+│   │   └── <elev>x<azim>.bin             # 25 precomputed stops, 3D rays + TL grid
+│   └── ray_view_reference.html           # draws binary reference stops with the shared infra renderer
 │
-└── harness/
-    ├── index.html                        # 4 iframes side by side (3 models + reference)
-    └── harness.js                        # postMessage aggregation, TL RMSE vs Bellhop,
-                                          #   synced camera, diff overlay, scorecard, cursor tooltip
+├── harness/
+│   ├── index.html                        # static harness chrome and six iframe cells
+│   ├── harness.js                        # lazy iframe lifecycle, postMessage aggregation,
+│   │                                     #   TL RMSE vs Bellhop, diff overlay, scorecard
+│   └── perf.js                           # opt-in dev overlay for ?perf=1
+│
+└── tools/
+    └── perf_check.mjs                    # CDP perf/regression check
 ```
 
 **Model tiers (orchestration parameter, NOT a prompt change).** The scored matchup
-is **Fugu Ultra vs Opus 4.8 (max) vs GPT 5.5 (Extra High) vs Gemini 2.5 Pro (Deep
-Think)** — best-vs-best, each model run at its own ceiling (each named tier is that
-model's maximal reasoning effort, so the comparison is ceiling-vs-ceiling, not a
-lower tier like high). The tier only sets how each model is run; the verbatim prompt
-is byte-identical regardless of tier, so a "max" run and a "high" run produce the
-same file from the same input — only reasoning effort differs. If the goal were
-instead a controlled equal-effort experiment, all sides would be pinned to the same
-tier; here we deliberately compare ceilings.
+is **Fugu Ultra vs Opus 4.8 (max) vs GPT 5.5 (Extra High) vs Gemini 3.1 Pro High
+vs Fable 5 Max** — best-vs-best, each model run at its own ceiling (each named
+tier is that model's maximal reasoning effort, so the comparison is
+ceiling-vs-ceiling, not a lower tier). The tier only sets how each model is run;
+the verbatim prompt is byte-identical regardless of tier. If the goal were instead
+a controlled equal-effort experiment, all sides would be pinned to the same tier;
+here we deliberately compare ceilings.
 
-**Build ownership — who builds what.** Four separate, isolated builders (three model
-runs + infra); do not collapse them into one session:
+**Build ownership — who builds what.** Six separate builders (five model runs +
+infra); do not collapse them into one session:
 
 - **Fugu model panel** (`models/fugu/ray_view.html`) — produced by **Codex → Fugu
   Ultra** from the verbatim prompt, in its own isolated run. No sight of the other
@@ -410,15 +456,18 @@ runs + infra); do not collapse them into one session:
   isolated GPT 5.5 (Extra High) session** from the verbatim prompt. No sight of the
   other models, the reference, or the harness internals.
 - **Gemini model panel** (`models/gemini/ray_view.html`) — produced by a **separate,
-  isolated Gemini 3.1 Pro High session** from the verbatim prompt
-  (`models/gemini/prompt.md`). No sight of the other models, the reference, or the
-  harness internals.
+  isolated Gemini 3.1 Pro High session** from the verbatim prompt. No sight of the
+  other models, the reference, or the harness internals.
+- **Fable model panel** (`models/fable/ray_view.html`) — produced by a **separate,
+  isolated Fable 5 Max session** from the verbatim prompt. No sight of the other
+  models, the reference, or the harness internals.
 - **Infrastructure = the "final UI"** (`harness/` + `reference/` + the shared WebGL
   renderer + `compute_reference.py`) — built by a **model-agnostic infra session**
-  (this one). This is the shell the user actually opens: it frames the five panels,
-  syncs the camera, and runs the scoring. It builds the reference panel too.
+  (this one). This is the shell the user actually opens: it frames the model and
+  reference panels, syncs controls, manages lazy mounting, and runs the scoring. It
+  builds the reference panel too.
 
-**Critical isolation rule.** The infra session and the three model runs MUST be
+**Critical isolation rule.** The infra session and the five model runs MUST be
 different sessions. Whoever builds the harness/reference has seen the comparison
 machinery and the reference physics, so that session must NOT also author a model
 panel — it would contaminate the model output. The infra builder only ever touches
@@ -427,21 +476,19 @@ the model panels' internals.
 
 ```text
                  HARNESS CHROME  ← infra session (the "final UI" shell)
-   ┌────────────┬────────────┬────────────┬────────────────────┐
-   │  Fugu UI   │  Opus UI   │  GPT UI    │    Gemini UI       │
-   │(Fugu Ultra)│(Opus 4.8mx)│(GPT 5.5 XH)│(Gemini 2.5 DThink)│
-   ├────────────┴────────────┴────────────┴────────────────────┤
-   │              Reference UI (BELLHOP3D — infra sess)        │
-   └────────────────────────────────────────────────────────────┘
-    isolated run  isolated run  isolated run  isolated run   model-agnostic
+   ┌────────┬────────┬────────┬────────┬────────┬──────────────┐
+   │ Fugu UI│ Opus UI│ GPT UI │Gemini UI│Fable UI│ Reference UI │
+   │(Ultra) │(4.8max)│(5.5 XH)│(3.1 Pro)│(5 Max) │ (Bellhop3D)  │
+   └────────┴────────┴────────┴────────┴────────┴──────────────┘
+    isolated isolated isolated isolated isolated    model-agnostic
 ```
 
 The reference panel reuses the shared infra renderer (per the "same renderer"
 clarification); the model files stay fully self-contained.
 
 **Merge point: harness only.** No mid-run cross-checking. Each agent produces its
-`ray_view.html` independently; the three panels are brought together exactly once,
-at the end, by `harness/index.html`, which loads the three model files plus the
+`ray_view.html` independently; the model panels are brought together exactly once,
+at the end, by `harness/index.html`, which loads the five model files plus the
 reference panel as isolated `<iframe>`s and runs the scoring. The shared contract
 between every panel and the harness is the `postMessage({type:'ray_metrics', ...})`
 payload + the canonical-grid TL field (101×49×31 Float32, dB, x-fastest).
@@ -462,36 +509,37 @@ metric card), and render quality is itself one of the compared axes. The **share
 renderer** is a single engine **we build once for the reference panel and the
 harness chrome only**; it is NOT injected into the model panels and does not
 homogenize them. "Shared visual language" is achieved by the reference panel + the
-harness frame (synced camera, scorecard, diff overlay) wrapping all three equally,
-not by making the model panels look identical.
+harness frame (synced camera, scorecard, diff overlay) wrapping every model
+equally, not by making the model panels look identical.
 
-**Comparison happens on the data contract, not the UI.** Every panel — all three
+**Comparison happens on the data contract, not the UI.** Every panel — all five
 models and the reference — emits, via `postMessage`, the metric-card numbers plus its TL
 field sampled on the identical canonical grid (101×49×31, Float32 dB, x-fastest).
 The harness scores everyone on that shared grid (TL RMSE and TL(R) error vs
 BELLHOP3D), so the verdict is apples-to-apples regardless of how differently each
-model draws its scene. The four panels side by side + synchronized camera are for
-human inspection; the scorecard + diff overlay are the objective result.
+model draws its scene. The live model-vs-reference comparison and synchronized
+camera are for human inspection; the scorecard + diff overlay are the objective
+result.
 
 ```text
                          HARNESS CHROME  (one shared frame)
-          synced camera · beam-stop · playback · scorecard · diff overlay
-  ┌─────────────┬─────────────┬─────────────┬─────────────┬──────────────────┐
-  │ models/fugu │ models/opus │  models/gpt │models/gemini│reference/bellhop │
-  │ray_view.html│ray_view.html│ray_view.html│ray_view.html│ray_view_ref.html │
-  │own renderer │own renderer │own renderer │own renderer │shared renderer   │
-  │(traces live)│(traces live)│(traces live)│(traces live)│(precomputed)     │
-  └──────┬──────┴──────┬──────┴──────┬──────┴──────┬──────┴──────┬───────────┘
-         │ postMessage │ postMessage │ postMessage │ postMessage │ postMessage
-         │ {metrics+TL}│ {metrics+TL}│ {metrics+TL}│ {metrics+TL}│ {metrics+TL}
-         └──────┬───────┴─────────────┴─────────────┴─────────────┘
+          lazy iframe lifecycle · synced camera · beam-stop · scorecard · diff overlay
+  ┌─────────────┬─────────────┬─────────────┬─────────────┬─────────────┬──────────────────┐
+  │ models/fugu │ models/opus │  models/gpt │models/gemini│models/fable │reference/bellhop │
+  │ray_view.html│ray_view.html│ray_view.html│ray_view.html│ray_view.html│ray_view_ref.html │
+  │own renderer │own renderer │own renderer │own renderer │own renderer │shared renderer   │
+  │(traces live)│(traces live)│(traces live)│(traces live)│(traces live)│(precomputed)     │
+  └──────┬──────┴──────┬──────┴──────┬──────┴──────┬──────┴──────┬──────┴──────┬───────────┘
+         │ postMessage │ postMessage │ postMessage │ postMessage │ postMessage │ postMessage
+         │ {metrics+TL}│ {metrics+TL}│ {metrics+TL}│ {metrics+TL}│ {metrics+TL}│ {metrics+TL}
+         └──────┬───────┴─────────────┴─────────────┴─────────────┴─────────────┘
                 ▼
     harness.js  →  TL RMSE & TL(R) error vs BELLHOP3D
-                   (identical 101×49×31 grid for all five panels)
-                   diff overlay · scorecard · ranking across the 4 models
+                   (identical 101×49×31 grid for all five models + reference)
+                   diff overlay · scorecard · ranking across the 5 models
 ```
 
-**Fairness rule — no UI mockup to the models.** The three models receive only the
+**Fairness rule — no UI mockup to the models.** The five models receive only the
 byte-identical verbatim prompt. Do NOT hand them a UI mockup: it would narrow the
 benchmark from "design+build the whole viz" to "implement this layout" (erasing the
 render-architecture discriminator), and any mockup that depicts the ray fan, shadow
@@ -502,8 +550,8 @@ as model input.
 ### Sliders are discrete and snap to a shared grid
 
 BELLHOP3D cannot run in the browser, so the reference panel can only show fan
-densities that were solved **offline in advance**. To keep all three panels
-showing the *same* fan at every slider position, the two beam sliders (elevation
+density stops that were solved **offline in advance**. To keep all live comparison
+panels showing the *same* fan at every slider position, the two beam sliders (elevation
 beams, azimuth beams) are **discrete and snap to a shared grid of stops**. The
 slider can have many visual positions but always reads from the nearest
 precomputed stop — it *feels* continuous while the data stays finite.
@@ -531,7 +579,7 @@ visual exploration only and do not change the scored numbers.
 - **Reference panel:** precomputes a real BELLHOP3D solve at each of the 25 stops;
   the slider does a table lookup (no solving in-browser).
 - **Model panels:** trace live, so any stop is cheap — but the harness **constrains
-  all three panels to the same active stop** so they always show the same fan
+  all model panels to the same active stop** so they always show the same fan
   (fair comparison). The harness syncs the active beam-stop across panels the same
   way it syncs the camera: via `postMessage`. The model files must expose set/get
   of the active beam-stop the same way they expose camera pose.
@@ -539,7 +587,8 @@ visual exploration only and do not change the scored numbers.
 ### Cost of the precomputed grid (offline, one-time)
 
 - **Compute:** 25 genuine-3D solves, most fast, a few minutes each →
-  **~30–90 min total, one-time.** Run once, ship the JSON; the browser never solves.
+  **~30–90 min total, one-time.** Run once, ship the binary stop files; the browser
+  never solves Bellhop.
 - **Storage:** coarse stops are tiny, so the total is dominated by — but not equal
   to — the densest fan. Total rays across all 25 stops =
   (11+21+41+61+81) × (9+16+31+46+61) = 215 × 163 ≈ 35k rays → **~35–50 MB**
@@ -558,12 +607,12 @@ not the TL grid. Encode for size:
   time (geometry alone is not enough). Encode positions as **Int16, quantized**
   over the domain box (50 km × 24 km × 3 km → ~1 m resolution, ample for
   visualization), travel time as **Float32**, ~**80–120 points per ray**
-  (rays bend smoothly; no need for 300+). Store as **base64 of the binary buffer**,
-  not JSON number text (saves ~40%).
-- **TL field** — 101×49×31 Float32 dB, row-major **x-fastest**, base64 binary
-  (~600 KB). Required at the **canonical stop** for scoring (TL RMSE vs models).
-  Optionally include TL grids at other stops to enrich the diff overlay, but
-  scoring only ever uses canonical.
+  (rays bend smoothly; no need for 300+). Store as raw little-endian binary inside
+  `reference/data/<elev>x<azim>.bin`, not JSON number text.
+- **TL field** — 101×49×31 Float32 dB, row-major **x-fastest** (~600 KB). Required
+  at the **canonical stop** for scoring (TL RMSE vs models). Other stop files also
+  carry TL grids so the diff overlay can follow the active stop, but scoring only
+  ever uses canonical.
 - This is the reference's analogue of each model's `postMessage` payload; the
   reference panel reads it and renders with the **shared reference/harness
   renderer** (see "Renderer ownership" above) — its own consistent visual language,
@@ -571,16 +620,16 @@ not the TL grid. Encode for size:
 
 ### Rendering architecture (premium + fast)
 
-Two separate loads: parsing the JSON once, and drawing every frame.
+Two separate costs: fetching/decoding the active stop, and drawing every frame.
 
-- **Parse/load (one-time):** only the **reference panel** carries the ~50 MB JSON;
-  the model panels trace live and load no big file. Decode lazily — only the
-  **active** snap-stop's fan is decoded from base64 into typed arrays (~few ms);
-  the other 24 stay as base64 until selected.
+- **Fetch/decode (lazy):** only the **reference panel** loads precomputed data, and
+  it fetches only the active `reference/data/<elev>x<azim>.bin` stop on demand.
+  The canonical stop loads first; the other 24 stay on disk/CDN until selected.
+  The model panels trace live and load no big Bellhop file.
 - **Per-frame draw — use raw WebGL, not Canvas2D.** The dense fan is ~4,941 rays ×
-  ~100 points ≈ 500k line segments; across three panels Canvas2D (CPU) would drop
-  to ~10–15 FPS, but raw WebGL (GPU) handles it comfortably at 60 FPS. Upload ray
-  vertices to a VBO once per stop; apply the projection matrix in the vertex
+  ~100 points ≈ 500k line segments. Canvas2D (CPU) falls over quickly when more
+  than one panel is live; raw WebGL (GPU) handles the dense fan smoothly. Upload
+  ray vertices to a VBO once per stop; apply the projection matrix in the vertex
   shader; drive the wavefront animation with a `currentTime` uniform compared
   against each vertex's travel-time attribute. The verbatim prompt already allows
   raw WebGL (only helper libs like three.js are banned) and asks for FPS in the
@@ -592,15 +641,18 @@ Two separate loads: parsing the JSON once, and drawing every frame.
 - **On slider change:** reference = instant table lookup; model panels = a brief
   live re-trace (≤~1 s for the dense fan) then smooth cached render — a short
   "computing…" state on the model panels is expected and acceptable.
+- **Harness lifecycle:** do not keep all panels mounted just because their cells
+  exist. The harness mounts only what the current view needs, warms panels
+  sequentially to harvest score payloads, and caps live WebGL contexts at two.
 
-**Bottom line:** discrete snap-grid + lazy per-stop decode + raw WebGL +
-point-splat volume keeps ~50 MB of precomputed data and the dense fan smooth and
-premium across all three panels. The trap to avoid is falling back to Canvas2D for
-the dense fan.
+**Bottom line:** discrete snap-grid + lazy per-stop fetch/decode + raw WebGL +
+point-splat volume + lazy iframe mounting keeps the dense fan smooth without
+pinning six live WebGL panels. The trap to avoid is falling back to Canvas2D for
+the dense fan or mounting every panel continuously.
 
 ### Build stack & hosting (decided)
 
-- **Build stack:** vanilla JS + raw WebGL for all three panels and the harness. The
+- **Build stack:** vanilla JS + raw WebGL for all model panels and the harness. The
   model files are *required* to be self-contained vanilla (no libs); the reference
   panel and harness use the same stack so they share one visual language and need no
   build step. No framework (React/etc.) — this is a visualization, not an app with
@@ -614,9 +666,8 @@ the dense fan.
   (25 files) plus a small `manifest.json` listing the stops and the canonical TL
   grid. The reference panel fetches only the **active** combo on demand (~0.3–5 MB);
   the canonical combo loads first, the rest lazy-load on slider change — initial load
-  is tiny instead of a 50 MB upfront download. (Vercel auto-compresses; base64 binary
-  still gzips ~25–30%.) This supersedes the single-file `bellhop_reference.json` named
-  in the orchestration tree above.
+  is tiny instead of a 50 MB upfront download. This supersedes the older
+  single-file `bellhop_reference.json` design.
 - **No-fetch rule:** the verbatim prompt's "no network fetch" constraint applies to
   the **model files only**. The reference panel MAY fetch its data files (it is not a
   model output), so this layout does not violate the prompt.

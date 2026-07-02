@@ -36,6 +36,8 @@
     #panel-2d.panel-minimized, #panel-arrivals.panel-minimized { height: 32px !important; }
     .btn-minimize { background: none; border: none; color: #aaa; cursor: pointer; font-weight: bold; font-size: 16px; padding: 0 4px; display: flex; align-items: center; }
     .btn-minimize:hover { color: #fff; }
+    /* Harness-controlled clean view: the simulation sidebar owns all controls. */
+    #controls, #metrics, #cam-hud { display: none !important; }
 </style>
 </head>
 <body>
@@ -208,6 +210,7 @@ let playing = false;
 let currentTime = 0;
 let maxTime = 40; // max sim time
 let lastFrameTime = performance.now();
+let animFrameTime = performance.now();
 let frames = 0;
 let fps = 0;
 let simMetrics = {};
@@ -525,6 +528,8 @@ function buildSeabed() {
 
 function render() {
     let now = performance.now();
+    let dt = Math.min(0.1, (now - animFrameTime) / 1000);
+    animFrameTime = now;
     frames++;
     if(now - lastFrameTime > 1000) {
         fps = Math.round((frames * 1000) / (now - lastFrameTime));
@@ -624,7 +629,7 @@ function render() {
     }
 
     if(playing) {
-        currentTime += 0.05 * parseFloat(document.getElementById('inp-speed').value) * 4;
+        currentTime += dt * parseFloat(document.getElementById('inp-speed').value) * (maxTime / 14);
         document.getElementById('inp-time').value = currentTime.toFixed(1);
         document.getElementById('lbl-time').innerText = currentTime.toFixed(1);
         if(currentTime > maxTime) playing = false;
@@ -800,7 +805,7 @@ setTimeout(() => {
       v=d.hidden?'none':'';
       ALL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display=v;});});
     } else if(t==='hide_controls'){
-      CTRL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display='none';});});
+      ALL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display='none';});});
     } else if(t==='play'){
       btn=document.getElementById('btn-play'); if(btn&&btn.innerText==='Play')btn.click();
     } else if(t==='pause'){
@@ -816,6 +821,11 @@ setTimeout(() => {
     } else if(t==='set_speed'){
       ss=document.getElementById('inp-speed');
       if(ss){ss.value=Math.min(5,Math.max(0.1,+d.speed||1)); ss.dispatchEvent(new Event('input'));}
+    } else if(t==='set_time'){
+      currentTime=Math.max(0,Math.min(1,+d.t||0))*maxTime;
+      playing=false;
+      ss=document.getElementById('inp-time');
+      if(ss){ss.value=currentTime.toFixed(1); ss.dispatchEvent(new Event('input'));}
     } else if(t==='set_opacity'){
       os=document.getElementById('inp-opacity');
       if(os){os.value=Math.min(1,Math.max(0,+d.v||0)); os.dispatchEvent(new Event('input'));}

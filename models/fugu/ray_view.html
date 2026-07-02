@@ -182,6 +182,8 @@ ASSUMPTIONS / MODEL NOTES
     .title { display: none; }
     .sliders { grid-template-columns: 1fr; }
   }
+  /* Harness-controlled clean view: the simulation sidebar owns all controls. */
+  .hud, #metricsPanel, #focusBtn, .statusLine { display: none !important; }
 </style>
 </head>
 <body class="controls-collapsed">
@@ -1164,7 +1166,7 @@ ASSUMPTIONS / MODEL NOTES
     state.frameCount++;
     state.fps = state.fps ? lerp(state.fps, 1 / Math.max(1e-4, dt), 0.06) : 1 / Math.max(1e-4, dt);
     if (state.playing && state.current) {
-      state.animTime += dt * state.speed;
+      state.animTime += dt * state.speed * (state.current.maxTime / 14);
       if (state.animTime >= state.current.maxTime) { state.animTime = state.current.maxTime; state.playing = false; UI.playBtn.textContent = 'Play'; }
       UI.timeSlider.value = String(state.animTime);
       UI.timeVal.textContent = `${state.animTime.toFixed(1)} s`;
@@ -1320,7 +1322,7 @@ ASSUMPTIONS / MODEL NOTES
       v=d.hidden?'none':'';
       ALL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display=v;});});
     } else if(t==='hide_controls'){
-      CTRL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display='none';});});
+      ALL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display='none';});});
     } else if(t==='play'){
       btn=document.getElementById('playBtn'); if(btn&&btn.textContent==='Play')btn.click();
     } else if(t==='pause'){
@@ -1336,6 +1338,13 @@ ASSUMPTIONS / MODEL NOTES
     } else if(t==='set_speed'){
       ss=document.getElementById('speedSlider');
       if(ss){ss.value=Math.min(8,Math.max(0.25,+d.speed||1)); ss.dispatchEvent(new Event('input'));}
+    } else if(t==='set_time'){
+      if(window.__ray_view&&window.__ray_view.state&&window.__ray_view.state.current){
+        window.__ray_view.state.playing=false;
+        window.__ray_view.state.animTime=Math.max(0,Math.min(1,+d.t||0))*window.__ray_view.state.current.maxTime;
+        ss=document.getElementById('timeSlider');
+        if(ss){ss.value=String(window.__ray_view.state.animTime); ss.dispatchEvent(new Event('input'));}
+      }
     } else if(t==='set_opacity'){
       os=document.getElementById('opacitySlider');
       if(os){os.value=Math.round((+d.v||0)*100); os.dispatchEvent(new Event('input'));}

@@ -1,8 +1,10 @@
 # uwa-ray-bench — Project Rules
 
-A three-way LLM benchmark: **Fugu Ultra vs Opus 4.8 (max) vs GPT 5.5 (Extra High)**
-each build a self-contained 3D underwater acoustic ray-propagation viz, scored against a
-**BELLHOP3D** reference (ground truth) on a shared TL grid.
+A five-way LLM benchmark: **Fugu Ultra vs Opus 4.8 (max) vs GPT 5.5 (Extra High) vs
+Gemini 3.1 Pro (High) vs Fable 5 (Max)** — each builds a self-contained 3D underwater acoustic
+ray-propagation viz, scored against a **BELLHOP3D** reference (ground truth) on a shared
+TL grid. The live roster is `models/*/` (currently `fugu`, `opus`, `gpt`, `gemini`,
+`fable`) — trust that directory over any model count named in prose, this doc included.
 
 **Single source of truth:** [docs/benchmark_spec.md](docs/benchmark_spec.md).
 Read it before touching anything. If this file and the spec disagree, the spec wins
@@ -15,7 +17,7 @@ Read it before touching anything. If this file and the spec disagree, the spec w
 Breaking any of these silently invalidates the comparison. Treat them as hard stops.
 
 1. **NEVER read, edit, or "improve" the model panels.**
-   `models/fugu/ray_view.html` and `models/opus/ray_view.html` are **model outputs**.
+   `models/<id>/ray_view.html` (fugu, opus, gpt, gemini, fable) are **model outputs**.
    The infra side only ever loads them as opaque `<iframe>`s. Do not open them to
    "check," copy patterns from them, or fix them.
 2. **The infra session must not author a model panel.** Whoever builds
@@ -32,11 +34,11 @@ Breaking any of these silently invalidates the comparison. Treat them as hard st
    values would contaminate the physics result.
 
 ```text
-            HARNESS CHROME  ← infra session (this repo's build work)
-   ┌──────────────┬──────────────┬──────────────┐
-   │   Fugu UI    │   Opus UI    │ Reference UI │   ← never touch the two
-   │ (Fugu Ultra) │ (Opus 4.8max)│ (infra sess) │     model panels' internals
-   └──────────────┴──────────────┴──────────────┘
+                     HARNESS CHROME  ← infra session (this repo's build work)
+   ┌────────┬────────┬────────┬────────┬────────┬──────────────┐
+   │ Fugu UI│ Opus UI│ GPT UI │Gemini UI│Fable UI│ Reference UI │  ← never touch
+   │(Ultra) │(4.8max)│(5.5 XH)│(3.1 Pro)│(5 Max) │ (infra sess) │    the 5 model
+   └────────┴────────┴────────┴────────┴────────┴──────────────┘    panels' internals
 ```
 
 ---
@@ -49,9 +51,9 @@ the shared WebGL renderer + `reference/bellhop3d/compute_reference.py`.
 ### Build stack — non-negotiable
 - **Vanilla JS + raw WebGL only.** No framework (React/Vue/etc.), no external library,
   no CDN, no build step. Model panels are *required* to be vanilla; harness +
-  reference match so all three share one visual language.
+  reference match so all panels share one visual language.
 - **Raw WebGL, not Canvas2D** for the scene (the dense 81/61 fan is ~500k line
-  segments — Canvas2D can't hold 60 FPS across three panels).
+  segments — Canvas2D can't hold 60 FPS across all panels).
 - **Insonified volume = point-splat / billboards**, not volumetric raymarch.
 - **100% static.** No backend, no serverless. Deploy target: **Vercel static site.**
 
@@ -75,7 +77,7 @@ palette). Always style from these CSS custom properties; never inline raw hex/bl
 
 Not desktop-only. The required portrait behavior:
 
-- Harness (`@media (max-width:680px)`): the 4 panels stack **4×1**, the scorecard
+- Harness (`@media (max-width:680px)`): the 5 model panels stack **5×1**, the scorecard
   bar-charts stack **9×1**, and the toolbar collapses into a **hamburger drawer**
   (`#bar-actions` + `#hamburger`, toggled by `#bar.nav-open`).
 - Reference panel (`@media (max-width:460px)`, on its own iframe width): the floating
@@ -122,6 +124,13 @@ exported numbers.
 - **Surgical edits.** Touch only what the task needs; match existing style; don't
   refactor working code or delete pre-existing dead code unasked.
 - **Git:** commit/push directly to `main`, no PRs, no feature branches unless asked.
-  (Not yet a git repo — `git init` first if/when versioning.)
 - Record locked design decisions in the spec, not just in chat — the spec is the
   durable memory.
+- **Model prompt:** the byte-identical verbatim prompt lives in one shared file,
+  [docs/model_prompt.md](docs/model_prompt.md) — not per-model prompt files.
+- **Perf regression check:** `node tools/perf_check.mjs` (flags: `--update-baseline`,
+  `--strict`, `--headless`, `--url <URL>`, `--keep-open`) drives a real headless-Chrome
+  probe of the harness (FPS, heap, live-iframe count, canonical scores vs
+  `tools/perf_baseline.json`) without opening any model panel. Defaults to a real
+  GPU window, not `--headless`, because the reference panel's TL decode is
+  compositor-gated and never renders under `--headless=new`.

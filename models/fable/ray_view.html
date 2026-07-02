@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D Ocean Acoustic Ray Propagation â ray_view.html</title>
+<!--
+===============================================================================
+ 3D OCEAN ACOUSTIC RAY-TRACING VISUALISER  (single self-contained file)
+ Plain <canvas> + vanilla JS. No external library / CDN / font / network.
+ All projection, ray physics, TL and coverage math computed IN-PAGE.
+
+ ASSUMPTIONS / CONFIG (canonical scored operating point)
+ -----------------------------------------------------------------------------
+ * Domain: range x 0..50 km, cross-range y 0..24 km, depth z 0..3000 m (z down).
+ * Sound speed c(z) (depth-only):
+     0<=z<=200 m :  c = 1520 - 0.10*z          (1520 -> 1500 m/s)
+     z>200 m     :  c = 1500 + 0.018*(z-200)    (min at z=200 m: a deep duct)
+   dc/dz is -0.10 for z<200 and +0.018 for z>200 (kink at 200 m).
+ * Bathymetry D(x,y) [m], two Gaussian seamounts over a 2500 m flat base
+   (see bathy()). Second seamount offset from centerline (asymmetric).
+ * SOURCE S = (0 km, 12 km, 50 m). RECEIVER R = (40 km, 9 km, 1000 m).
+ * LAUNCH FAN (canonical): elevation -20..+20 deg, 41 beams (1 deg step);
+   azimuth -15..+15 deg, 31 beams (1 deg step)  => 41 x 31 = 1271 rays.
+   (elevation +ve = downward, i.e. +z.)
+ * RAY MODEL: continuous refraction via the 3D eikonal ray equations
+     dx_i/ds = c*p_i ,  dp_i/ds = d(1/c)/dx_i = -(1/c^2) dc/dx_i
+   Since dc/dx = dc/dy = 0, p_x and p_y are conserved between reflections
+   (Snell invariant sqrt(px^2+py^2)=cos(theta)/c). Integrated with RK4,
+   arc-length step DS = 150 m, max MAXSTEP = 420 steps (~63 km path).
+   THIS IS NOT STRAIGHT-LINE PROPAGATION â rays bend toward the sound-speed min.
+ * REFLECTIONS: pressure-release SURFACE z=0 (pz -> -pz, no loss); SEABED via
+   the local 3D normal n = norm(-dD/dx, -dD/dy, 1); specular reflection about n
+   (p' = p - 2 (p.n) n). A sloped seabed deflects rays OUT of their launch
+   plane (full 3D bounce â tracked as |dy| out-of-plane deflection).
+ * SEABED LOSS: canonical half-space c2=1600 m/s, rho2=1.8 g/cc, alpha=0.5
+   dB/lambda. Per-bounce loss = -20*log10(|R|) with R the fluid-fluid Rayleigh
+   reflection coefficient using a COMPLEX bottom sound speed to embed the
+   0.5 dB/lambda attenuation (Im(k2)/Re(k2)=alpha/(8.686*2*pi)=~0.00916).
+   Loss clamped to [0.2, 15] dB/bounce. Surface loss = 0.
+ * TRANSMISSION LOSS (geometric-spreading approximation ONLY â no full-wave /
+   caustic corrections): ray-tube divergence via the Jacobian of the launch
+   fan. At matched arc-length index k, the tube cross-section per unit solid
+   angle is  dA/dOmega = |dP/dtheta x dP/dphi| / cos(elev). Then
+     p = sqrt(dOmega/dA)  (relative to 1 m),   TL = -20*log10(p) = 10*log10(dA/dOmega)
+   plus accumulated boundary loss. Intensity is CLAMPED at caustics
+   (|dA/dOmega| >= 0.25 m^2/sr) so values stay finite. Fan-edge rays use a
+   spherical-spreading fallback TL = 20*log10(range).
+ * SHADOW CUTOFF: a voxel/point is "shadow" when TL > 80 dB (stated cutoff).
+ * VOXEL MASK (render/coverage): 24 (x) x 12 (y) x 15 (z) = 4320 voxels.
+   Reachability of a voxel: min TL of any traced ray sample splatted into it
+   is <= 80 dB. Computed ONCE after tracing (static).
+ * RECEIVER reach tolerance = 400 m; EIGENRAY tolerance = 300 m (nearest ray
+   sample to R). Reciprocity self-check re-traces S<->R swapped. Convergence
+   self-check re-traces at 2x beams (81 x 61).
+ * COMPARISON GRID for postMessage TL field: 101 (x) x 49 (y) x 31 (z),
+   evenly spanning the full domain, flat Float32 dB, row-major x-fastest.
+ * Vertical exaggeration = 6x for visual clarity (depth axis only).
+===============================================================================
+-->
+<style>
+  html,body{margin:0;padding:0;background:#04070f;color:#cfe6ff;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    overflow:hidden;height:100%;}
+  #wrap{position:fixed;inset:0;}
+  canvas{display:block;}
+  #main{position:absolute;inset:0;}
+  #xsec{position:absolute;right:8px;bottom:8px;border:1px solid #234;border-radius:6px;
+    background:#02040a;box-shadow:0 0 12px #000;}
+  #controls{position:absolute;left:8px;top:8px;background:rgba(8,14,26,.82);
+    border:1px solid #1d2c44;border-radius:8px;padding:8px 10px;font-size:11px;
+    width:250px;backdrop-filter:blur(3px);}
+  #controls .row{margin:5px 0;display:flex;align-items:center;justify-content:space-between;gap:6px;}
+  #controls label{font-size:10.5px;color:#9fc2e8;}
+  #controls input[type=range]{width:120px;}
+  button{background:#12315a;color:#dcefff;border:1px solid #2a5a94;border-radius:5px;
+    padding:4px 7px;font-size:10.5px;cursor:pointer;}
+  button:hover{background:#1c4a86;}
+  button.on{background:#1f7a3f;border-color:#33c060;}
+  #btns{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px;}
+  #metrics{position:absolute;right:10px;top:10px;width:300px;
+    background:linear-gradient(160deg,rgba(15,24,44,.94),rgba(7,11,22,.94));
+    border:1px solid rgba(96,144,208,.22);border-radius:14px;padding:12px 12px 11px;
+    box-shadow:0 10px 34px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.05);
+    backdrop-filter:blur(9px);max-height:calc(100vh - 20px);overflow-y:auto;font-size:10.5px;}
+  #metrics::-webkit-scrollbar{width:6px;}
+  #metrics::-webkit-scrollbar-thumb{background:#24344f;border-radius:3px;}
+  .mHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+  .mHead h3{margin:0;font-size:13px;font-weight:700;letter-spacing:.2px;
+    background:linear-gradient(90deg,#8fd6ff,#c7ecff);-webkit-background-clip:text;
+    background-clip:text;-webkit-text-fill-color:transparent;}
+  #offflag{display:none;align-items:center;font-size:8.5px;font-weight:700;letter-spacing:.5px;
+    color:#ffca7a;background:rgba(255,170,60,.14);border:1px solid rgba(255,170,60,.42);
+    padding:2px 8px;border-radius:20px;}
+  .hero{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:11px;
+    background:linear-gradient(135deg,rgba(30,150,90,.26),rgba(16,50,38,.10));
+    border:1px solid rgba(60,220,130,.32);}
+  .hero.no{background:linear-gradient(135deg,rgba(170,50,50,.26),rgba(50,18,18,.10));
+    border-color:rgba(255,95,95,.34);}
+  .hero .dot{width:12px;height:12px;border-radius:50%;background:#39e06a;
+    box-shadow:0 0 11px #39e06a;flex:0 0 auto;}
+  .hero.no .dot{background:#ff5f5f;box-shadow:0 0 11px #ff5f5f;}
+  .hero .hmain{flex:1;}
+  .hero .hlab{font-size:8.5px;letter-spacing:1px;color:#a9c6e4;text-transform:uppercase;}
+  .hero .hbig{font-size:16px;font-weight:800;color:#eafff2;letter-spacing:.3px;}
+  .hero.no .hbig{color:#ffdede;}
+  .hero .hstats{display:flex;gap:13px;text-align:right;}
+  .hero .hstats span{display:block;font-size:8px;color:#9fbfe0;text-transform:uppercase;letter-spacing:.4px;}
+  .hero .hstats b{font-size:13px;color:#eafff2;font-variant-numeric:tabular-nums;font-weight:700;}
+  .hero .hstats small{font-size:8.5px;font-weight:500;color:#9fbfe0;margin-left:1px;}
+  .sect{font-size:8.5px;letter-spacing:1.3px;text-transform:uppercase;color:#5f7ba0;
+    margin:9px 3px 5px;font-weight:700;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+  .kpi{position:relative;background:rgba(255,255,255,.04);border:1px solid rgba(120,160,210,.13);
+    border-radius:9px;padding:6px 8px 6px 10px;overflow:hidden;transition:background .15s;}
+  .kpi:hover{background:rgba(255,255,255,.07);}
+  .kpi::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2.5px;background:var(--ac,#3a80d0);}
+  .kpi.wide{grid-column:1 / 3;}
+  .kpi .lab{font-size:8px;letter-spacing:.4px;text-transform:uppercase;color:#86a4c7;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .kpi .val{font-size:16px;font-weight:700;color:#eafff0;font-variant-numeric:tabular-nums;
+    line-height:1.2;margin-top:1px;}
+  .kpi .val small{font-size:9px;font-weight:500;color:#8fb2d8;margin-left:2px;}
+  .kpi .mut{font-size:10px;font-weight:500;color:#6f8cb0;}
+  .kpi .bar{height:4px;border-radius:3px;background:rgba(255,255,255,.08);margin-top:5px;overflow:hidden;}
+  .kpi .bar i{display:block;height:100%;border-radius:3px;}
+  .arr{font-size:9.5px;color:#9fc2e8;font-variant-numeric:tabular-nums;line-height:1.55;margin:0 3px 2px;}
+  #legend{position:absolute;left:8px;bottom:8px;background:rgba(8,14,26,.8);
+    border:1px solid #1d2c44;border-radius:8px;padding:7px 9px;font-size:10.5px;}
+  #camhud{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);
+    background:rgba(8,14,26,.8);border:1px solid #1d2c44;border-radius:8px;
+    padding:5px 12px;font-size:11px;color:#7d93b8;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;
+    white-space:nowrap;pointer-events:none;}
+  #legend .sw{display:inline-block;width:11px;height:11px;border-radius:2px;
+    margin-right:5px;vertical-align:middle;}
+  .canonTick{font-size:9px;color:#5fd08f;}
+  #stem{background:#02040a;border:1px solid #16283f;border-radius:4px;margin-top:4px;}
+  small{color:#6f8cb0;}
+  /* Harness-controlled clean view: the simulation sidebar owns all controls. */
+  #controls, #metrics, #camhud { display:none !important; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="main"></canvas>
+  <canvas id="xsec" width="330" height="200"></canvas>
+
+  <div id="controls">
+    <div id="btns">
+      <button id="play">â¶ Play</button>
+      <button id="reset">â² Reset</button>
+      <button id="camreset">Camera</button>
+      <button id="canon">Reset canonical</button>
+      <button id="tltoggle">Color: Glow</button>
+    </div>
+    <div class="row">
+      <label>Elevation beams <span class="canonTick">(canon 41)</span></label>
+      <span id="eN">41</span>
+    </div>
+    <div class="row"><input id="elevBeams" type="range" min="9" max="61" step="2" value="41"></div>
+    <div class="row">
+      <label>Azimuth beams <span class="canonTick">(canon 31)</span></label>
+      <span id="aN">31</span>
+    </div>
+    <div class="row"><input id="azBeams" type="range" min="5" max="45" step="2" value="31"></div>
+    <div class="row"><label>Playback scrub</label><span id="tLbl">0.0 s</span></div>
+    <div class="row"><input id="scrub" type="range" min="0" max="1000" step="1" value="0"></div>
+    <div class="row"><label>Speed</label><span id="spdLbl">1.0x</span></div>
+    <div class="row"><input id="speed" type="range" min="0.2" max="4" step="0.1" value="1"></div>
+    <div class="row"><label>Volume opacity</label><span id="opLbl">0.35</span></div>
+    <div class="row"><input id="opacity" type="range" min="0" max="1" step="0.02" value="0.35"></div>
+    <div><small>drag = orbit Â· scroll = zoom</small></div>
+  </div>
+
+  <div id="metrics">
+    <div class="mHead"><h3>Ray-model metrics</h3><span id="offflag">â  OFF-CANONICAL</span></div>
+    <div id="mBody">computingâ¦</div>
+    <canvas id="stem" width="276" height="72"></canvas>
+  </div>
+
+  <div id="camhud">cam&nbsp;&nbsp;yaw 0Â° Â· pitch 0Â° Â· zoom 1.00Ã</div>
+
+  <div id="legend">
+    <div><span class="sw" style="background:linear-gradient(#7fe9ff,#04122a)"></span>water (depth gradient)</div>
+    <div><span class="sw" style="background:#bca06a"></span>seabed / seamounts</div>
+    <div><span class="sw" style="background:hsl(200,90%,60%)"></span>rays (by launch elevation)</div>
+    <div><span class="sw" style="background:#37e0c0"></span>insonified volume</div>
+    <div><span class="sw" style="background:#0a0e18;border:1px solid #223"></span>shadow (empty/dark)</div>
+    <div><span class="sw" style="background:#ffe6b0"></span>S source Â· <span class="sw" style="background:#4fe8ff"></span>R receiver</div>
+    <div><small>depth exaggerated 6Ã for clarity</small></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+//============================ CONFIG / CONSTANTS ============================
+var DEG=Math.PI/180;
+var DOMX=50000, DOMY=24000, DOMZ=3000;      // domain extents (m)
+var S={x:0, y:12000, z:50};                 // source
+var R={x:40000, y:9000, z:1000};            // receiver
+var DS=150;                                 // arc-length step (m)
+var MAXSTEP=420;                            // max integration steps
+var ELEV_MIN=-20, ELEV_MAX=20;              // deg
+var AZ_MIN=-15, AZ_MAX=15;                  // deg
+var CANON_E=41, CANON_A=31;
+var TL_CUTOFF=80;                           // dB shadow cutoff
+var REACH_TOL=400, EIG_TOL=300;             // m
+var VX=24, VY=12, VZ=15;                     // render/coverage voxel grid
+var NX=101, NY=49, NZ=31;                    // comparison grid
+var ZEXAG=6;
+
+// half-space bottom
+var C2=1600, RHO1=1.0, RHO2=1.8;
+var ALPHA_DBpL=0.5;
+var BOT_EPS=ALPHA_DBpL/(8.686*2*Math.PI);   // Im/Re ratio of bottom wavenumber (~0.00916)
+
+//============================ PHYSICS ============================
+function cofz(z){ return (z<=200)? (1520-0.10*z) : (1500+0.018*(z-200)); }
+function dcdz(z){ return (z<200)? -0.10 : 0.018; }
+
+// bathymetry: returns [D, dD/dx, dD/dy] in metres / (per metre)
+function bathy(x,y){
+  var xk=x/1000, yk=y/1000;
+  var u1=((xk-18)/2.5), v1=((yk-12)/3.0);
+  var u2=((xk-34)/2.0), v2=((yk-9)/2.5);
+  var g1=Math.exp(-(u1*u1+v1*v1));
+  var g2=Math.exp(-(u2*u2+v2*v2));
+  var D=2500 - 1500*g1 - 1900*g2;
+  // d/dxk : -1500*g1*(-2 u1/2.5) - 1900*g2*(-2 u2/2.0)
+  var dDdxk = 1500*g1*(2*u1/2.5) + 1900*g2*(2*u2/2.0);
+  var dDdyk = 1500*g1*(2*v1/3.0) + 1900*g2*(2*v2/2.5);
+  return [D, dDdxk/1000, dDdyk/1000];
+}
+
+// complex sqrt (principal, Im>=0 for Im(arg)>=0)
+function csqrt(re,im){
+  var r=Math.hypot(re,im);
+  var a=Math.sqrt(Math.max(0,(r+re)/2));
+  var b=Math.sqrt(Math.max(0,(r-re)/2));
+  if(im<0) b=-b;
+  return [a,b];
+}
+// per-bounce seabed loss (dB) from Rayleigh coefficient, sinG = sin(grazing), c1=water speed
+function bottomLoss(sinG, c1){
+  sinG=Math.min(1,Math.max(1e-4,sinG));
+  var cosG=Math.sqrt(1-sinG*sinG);
+  var k1=1/c1;
+  var k2r=1/C2;
+  var k1z=k1*sinG;                 // real
+  var kx=k1*cosG;                  // horizontal wavenumber (real, conserved)
+  // k2^2 = k2r^2 (1+i eps)^2 = k2r^2[(1-eps^2)+ i 2eps]
+  var k2sq_re=k2r*k2r*(1-BOT_EPS*BOT_EPS);
+  var k2sq_im=k2r*k2r*(2*BOT_EPS);
+  var k2z=csqrt(k2sq_re-kx*kx, k2sq_im);   // complex
+  // R = (rho2*k1z - rho1*k2z)/(rho2*k1z + rho1*k2z)
+  var numr=RHO2*k1z-RHO1*k2z[0], numi=-RHO1*k2z[1];
+  var denr=RHO2*k1z+RHO1*k2z[0], deni=RHO1*k2z[1];
+  var magR=Math.hypot(numr,numi)/Math.max(1e-9,Math.hypot(denr,deni));
+  magR=Math.min(1,Math.max(1e-4,magR));
+  var loss=-20*Math.log10(magR);
+  return Math.min(15,Math.max(0.2,loss));
+}
+
+// RK4 derivative of state [x,y,z,px,py,pz]
+function deriv(s,out){
+  var z=s[2];
+  var c=cofz(z), dc=dcdz(z);
+  out[0]=c*s[3]; out[1]=c*s[4]; out[2]=c*s[5];
+  out[3]=0; out[4]=0; out[5]=-(1/(c*c))*dc;
+}
+
+// trace a single ray; returns geometry + per-step travel time & accumulated bottom loss
+function traceOne(src, elevRad, azRad){
+  var c0=cofz(src.z);
+  var dirx=Math.cos(elevRad)*Math.cos(azRad),
+      diry=Math.cos(elevRad)*Math.sin(azRad),
+      dirz=Math.sin(elevRad);
+  var s=[src.x,src.y,src.z, dirx/c0, diry/c0, dirz/c0];
+  var xs=[s[0]],ys=[s[1]],zs=[s[2]],ts=[0],bl=[0];
+  var t=0, accBL=0;
+  var maxDy=0, snellRef=Math.hypot(s[3],s[4]), snellDrift=0;
+  var k1=[0,0,0,0,0,0],k2=[0,0,0,0,0,0],k3=[0,0,0,0,0,0],k4=[0,0,0,0,0,0],tmp=[0,0,0,0,0,0];
+  var sinAz=Math.sin(azRad), cosAz=Math.cos(azRad);
+  for(var step=0; step<MAXSTEP; step++){
+    var zPrev=s[2];
+    deriv(s,k1);
+    for(var i=0;i<6;i++) tmp[i]=s[i]+0.5*DS*k1[i]; deriv(tmp,k2);
+    for(i=0;i<6;i++) tmp[i]=s[i]+0.5*DS*k2[i]; deriv(tmp,k3);
+    for(i=0;i<6;i++) tmp[i]=s[i]+DS*k3[i];      deriv(tmp,k4);
+    for(i=0;i<6;i++) s[i]+=DS/6*(k1[i]+2*k2[i]+2*k3[i]+k4[i]);
+    // travel time using mid-depth speed
+    t += DS/cofz(0.5*(zPrev+s[2]));
+    // surface reflection (pressure release). Insert the z=0 contact point so
+    // the polyline touches the surface instead of poking above it.
+    if(s[2]<0){
+      var xl=xs[xs.length-1], yl=ys[ys.length-1], zl=zs[zs.length-1];
+      var fr=(zl-s[2]!==0)?zl/(zl-s[2]):0; fr=Math.max(0,Math.min(1,fr));
+      xs.push(xl+(s[0]-xl)*fr); ys.push(yl+(s[1]-yl)*fr); zs.push(0); ts.push(t); bl.push(accBL);
+      s[2]=-s[2]; s[5]=-s[5];
+    }
+    // seabed reflection. Insert the true seabed-contact point (on z=D) BEFORE
+    // the reflected point, so the drawn ray touches the seabed rather than
+    // chording across a convex seamount peak between two above-seabed samples.
+    var b=bathy(s[0],s[1]);
+    if(s[2]>b[0]){
+      var x0=xs[xs.length-1], y0=ys[ys.length-1], z0=zs[zs.length-1];
+      var g0=z0-bathy(x0,y0)[0], g1=s[2]-b[0];
+      var frac=(g1-g0!==0)?(-g0)/(g1-g0):0; frac=Math.max(0,Math.min(1,frac));
+      var cx=x0+(s[0]-x0)*frac, cy=y0+(s[1]-y0)*frac, cz=bathy(cx,cy)[0];
+      xs.push(cx); ys.push(cy); zs.push(cz); ts.push(t); bl.push(accBL);   // seabed contact
+      var nx=-b[1], ny=-b[2], nz=1, nl=Math.hypot(nx,ny,nz);
+      nx/=nl; ny/=nl; nz/=nl;
+      var vdn=s[3]*nx+s[4]*ny+s[5]*nz;
+      s[3]-=2*vdn*nx; s[4]-=2*vdn*ny; s[5]-=2*vdn*nz;
+      var cc=cofz(b[0]);
+      var sinG=Math.min(1,Math.abs(vdn)*cc);   // |p|=1/c -> sin(grazing)=|v.n|*c
+      accBL += bottomLoss(sinG, cc);
+      s[2]=2*b[0]-s[2]; if(s[2]<0)s[2]=0;
+      snellRef=Math.hypot(s[3],s[4]);          // reset invariant reference after bounce
+    }
+    var sn=Math.hypot(s[3],s[4]);
+    if(Math.abs(sn-snellRef)>snellDrift) snellDrift=Math.abs(sn-snellRef);
+    var dyoff=Math.abs((s[0]-src.x)*sinAz-(s[1]-src.y)*cosAz);
+    if(dyoff>maxDy) maxDy=dyoff;
+    xs.push(s[0]);ys.push(s[1]);zs.push(s[2]);ts.push(t);bl.push(accBL);
+    if(s[0]>DOMX||s[0]<0||s[1]<0||s[1]>DOMY) break;
+  }
+  return {xs:xs,ys:ys,zs:zs,ts:ts,bl:bl,n:xs.length,
+          elev:elevRad,az:azRad,maxDy:maxDy,snellDrift:snellDrift};
+}
+
+function beamList(a,b,n){ var L=[]; for(var i=0;i<n;i++) L.push((n===1)?(a+b)/2 : a+(b-a)*i/(n-1)); return L; }
+
+// full fan trace + TL (ray-tube Jacobian) + grids + target analysis.
+// az0 = boresight azimuth (rad): the Â±15deg azimuth fan is centred on az0.
+// For S->R the target lies toward +x (az0=0); for the reciprocity swap R->S
+// the target lies toward -x, so the fan must be aimed with az0=PI.
+function traceFan(src, E, A, target, computeComp, az0){
+  az0=az0||0;
+  var elevs=beamList(ELEV_MIN*DEG, ELEV_MAX*DEG, E);
+  var azs  =beamList(AZ_MIN*DEG+az0, AZ_MAX*DEG+az0, A);
+  var dEl=(E>1)?(elevs[1]-elevs[0]):1, dAz=(A>1)?(azs[1]-azs[0]):1;
+  var rays=new Array(E*A);
+  var maxDy=0, maxSnell=0, maxT=0;
+  for(var ie=0;ie<E;ie++){
+    for(var ia=0;ia<A;ia++){
+      var r=traceOne(src, elevs[ie], azs[ia]);
+      r.ie=ie; r.ia=ia; r.tl=new Float32Array(r.n);
+      rays[ie*A+ia]=r;
+      if(r.maxDy>maxDy)maxDy=r.maxDy;
+      if(r.snellDrift>maxSnell)maxSnell=r.snellDrift;
+      if(r.ts[r.n-1]>maxT)maxT=r.ts[r.n-1];
+    }
+  }
+  // ---- ray-tube Jacobian TL ----
+  function P(i,k,d){ var r=rays[i]; return d===0?r.xs[k]:(d===1?r.ys[k]:r.zs[k]); }
+  for(var ie=0;ie<E;ie++) for(var ia=0;ia<A;ia++){
+    var i=ie*A+ia, r=rays[i], cosel=Math.max(0.05,Math.cos(r.elev));
+    var interior=(ie>0&&ie<E-1&&ia>0&&ia<A-1);
+    for(var k=0;k<r.n;k++){
+      var tlg;
+      var ok=interior;
+      if(ok){
+        var im=(ie-1)*A+ia, ip=(ie+1)*A+ia, jm=ie*A+(ia-1), jp=ie*A+(ia+1);
+        if(rays[im].n<=k||rays[ip].n<=k||rays[jm].n<=k||rays[jp].n<=k) ok=false;
+      }
+      if(ok){
+        var ex=(P(ip,k,0)-P(im,k,0))/(2*dEl), ey=(P(ip,k,1)-P(im,k,1))/(2*dEl), ez=(P(ip,k,2)-P(im,k,2))/(2*dEl);
+        var ax=(P(jp,k,0)-P(jm,k,0))/(2*dAz), ay=(P(jp,k,1)-P(jm,k,1))/(2*dAz), az2=(P(jp,k,2)-P(jm,k,2))/(2*dAz);
+        var cx=ey*az2-ez*ay, cy=ez*ax-ex*az2, cz=ex*ay-ey*ax;
+        var area=Math.hypot(cx,cy,cz)/cosel;
+        area=Math.max(0.25, area);           // clamp intensity at caustics
+        tlg=10*Math.log10(area);
+      } else {
+        var rr=Math.hypot(r.xs[k]-src.x, r.ys[k]-src.y, r.zs[k]-src.z);
+        tlg=20*Math.log10(Math.max(1,rr));   // spherical fallback (edge rays)
+      }
+      r.tl[k]=tlg+r.bl[k];
+    }
+  }
+  // ---- coarse voxel grid (min TL) ----
+  var coarse=new Float32Array(VX*VY*VZ); coarse.fill(999);
+  var comp=null;
+  if(computeComp){ comp=new Float32Array(NX*NY*NZ); comp.fill(120); }
+  for(var i=0;i<rays.length;i++){
+    var r=rays[i];
+    for(var k=0;k<r.n;k++){
+      var x=r.xs[k],y=r.ys[k],z=r.zs[k],tl=r.tl[k];
+      var vx=Math.floor(x/(DOMX/VX)), vy=Math.floor(y/(DOMY/VY)), vz=Math.floor(z/(DOMZ/VZ));
+      if(vx>=0&&vx<VX&&vy>=0&&vy<VY&&vz>=0&&vz<VZ){
+        var id=vx+VX*(vy+VY*vz); if(tl<coarse[id]) coarse[id]=tl;
+      }
+      if(comp){
+        var cx2=Math.round(x/(DOMX/(NX-1))), cy2=Math.round(y/(DOMY/(NY-1))), cz2=Math.round(z/(DOMZ/(NZ-1)));
+        if(cx2>=0&&cx2<NX&&cy2>=0&&cy2<NY&&cz2>=0&&cz2<NZ){
+          var cid=cx2+NX*(cy2+NY*cz2); if(tl<comp[cid]) comp[cid]=tl;
+        }
+      }
+    }
+  }
+  // ---- coverage fraction (water voxels only) ----
+  var water=0, inson=0;
+  for(var vz=0;vz<VZ;vz++)for(var vy=0;vy<VY;vy++)for(var vx=0;vx<VX;vx++){
+    var ccx=(vx+0.5)*(DOMX/VX), ccy=(vy+0.5)*(DOMY/VY), ccz=(vz+0.5)*(DOMZ/VZ);
+    if(ccz < bathy(ccx,ccy)[0]){
+      water++;
+      var id=vx+VX*(vy+VY*vz);
+      if(coarse[id]<=TL_CUTOFF) inson++;
+    }
+  }
+  var insonFrac=water?inson/water:0, shadowFrac=1-insonFrac;
+  // ---- target (R) analysis ----
+  var miss=1e12, tgtTL=999, eig=[];
+  for(var i=0;i<rays.length;i++){
+    var r=rays[i], best=1e12, bk=0;
+    for(var k=0;k<r.n;k++){
+      var d=Math.hypot(r.xs[k]-target.x, r.ys[k]-target.y, r.zs[k]-target.z);
+      if(d<best){best=d;bk=k;}
+    }
+    if(best<miss){miss=best; tgtTL=r.tl[bk];}
+    if(best<EIG_TOL) eig.push({t:r.ts[bk], tl:r.tl[bk], elev:r.elev/DEG, az:r.az/DEG, miss:best});
+  }
+  eig.sort(function(a,b){return a.t-b.t;});
+  var reached=miss<=REACH_TOL;
+  // received TL at target: incoherent (energy) sum over eigenray arrivals if
+  // reached; otherwise the single nearest-ray value. TL=-10log10(sum 10^(-TLi/10)).
+  if(reached && eig.length){
+    var isum=0; for(var e=0;e<eig.length;e++) isum+=Math.pow(10,-eig[e].tl/10);
+    tgtTL=-10*Math.log10(isum);
+  }
+  return {rays:rays, coarse:coarse, comp:comp, E:E, A:A,
+    insonFrac:insonFrac, shadowFrac:shadowFrac, miss:miss, tgtTL:tgtTL,
+    reached:reached, maxDy:maxDy, maxSnell:maxSnell, maxT:maxT, eig:eig};
+}
+
+//============================ STATE ============================
+var data=null;                 // current fan result (rendered)
+var selfchk={reciErr:null, dInson:null, dTL:null, done:false};
+var cam={yaw:0.62, pitch:0.46, zoom:330};
+var anim={playing:false, time:0, speed:1, opacity:0.35, colorByTL:false};
+var perf={fps:0,last:0,acc:0,frames:0};
+var fileKB=0;
+
+//============================ CANVAS / PROJECTION ============================
+var main=document.getElementById('main'), ctx=main.getContext('2d');
+var xsec=document.getElementById('xsec'), xctx=xsec.getContext('2d');
+var stem=document.getElementById('stem'), sctx=stem.getContext('2d');
+var W,H,CX,CY;
+function resize(){ W=main.width=innerWidth; H=main.height=innerHeight; CX=W/2; CY=H/2; }
+window.addEventListener('resize',resize); resize();
+
+function project(x,y,z){
+  var nx=(x-DOMX/2)/25000, ny=(y-DOMY/2)/25000, nz=((z-DOMZ/2)*ZEXAG)/25000;
+  var cy=Math.cos(cam.yaw), sy=Math.sin(cam.yaw);
+  var a=nx*cy-ny*sy, b=nx*sy+ny*cy;
+  var cp=Math.cos(cam.pitch), sp=Math.sin(cam.pitch);
+  var b2=b*cp-nz*sp, c2=b*sp+nz*cp;
+  return {X:CX+cam.zoom*a, Y:CY+cam.zoom*c2, depth:b2};
+}
+function hsl(h,s,l,a){ return 'hsla('+h+','+s+'%,'+l+'%,'+(a===undefined?1:a)+')'; }
+function jetRGB(t){ // t 0..1  (low TL -> hot)
+  t=Math.min(1,Math.max(0,t));
+  var r=Math.min(1,Math.max(0,1.5-Math.abs(4*t-3)));
+  var g=Math.min(1,Math.max(0,1.5-Math.abs(4*t-2)));
+  var b=Math.min(1,Math.max(0,1.5-Math.abs(4*t-1)));
+  return [r*255|0, g*255|0, b*255|0];
+}
+function jet(t){ var c=jetRGB(t); return 'rgb('+c[0]+','+c[1]+','+c[2]+')'; }
+function elevColor(elev,a){ // map elevation to rainbow hue
+  var t=(elev/DEG-ELEV_MIN)/(ELEV_MAX-ELEV_MIN);
+  return hsl(280-260*t,90,60,a===undefined?1:a);
+}
+
+//============================ SCENE PIECES ============================
+// bounding box corners
+function boxEdges(){
+  var c=[];
+  for(var xi=0;xi<2;xi++)for(var yi=0;yi<2;yi++)for(var zi=0;zi<2;zi++)
+    c.push([xi*DOMX,yi*DOMY,zi*DOMZ]);
+  var E=[[0,1],[0,2],[0,4],[1,3],[1,5],[2,3],[2,6],[3,7],[4,5],[4,6],[5,7],[6,7]];
+  ctx.strokeStyle='rgba(120,160,210,.45)'; ctx.lineWidth=1;
+  for(var i=0;i<E.length;i++){
+    var p=project.apply(null,c[E[i][0]]), q=project.apply(null,c[E[i][1]]);
+    ctx.beginPath(); ctx.moveTo(p.X,p.Y); ctx.lineTo(q.X,q.Y); ctx.stroke();
+  }
+  // axis ticks + labels
+  ctx.fillStyle='#9fc2e8'; ctx.font='10px sans-serif';
+  for(var xi=0;xi<=5;xi++){ var xx=xi*10000; var p=project(xx,0,DOMZ); ctx.fillText((xx/1000)+'',p.X-4,p.Y+12); }
+  var pl=project(25000,0,DOMZ); ctx.fillText('range x (km)',pl.X-24,pl.Y+24);
+  for(var yi=0;yi<=4;yi++){ var yy=yi*6000; var p=project(DOMX,yy,DOMZ); ctx.fillText((yy/1000)+'',p.X+4,p.Y+4); }
+  var pl2=project(DOMX,12000,DOMZ); ctx.fillText('cross-range y (km)',pl2.X+6,pl2.Y+16);
+  for(var zi=0;zi<=3;zi++){ var zz=zi*1000; var p=project(0,0,zz); ctx.fillText(zz+'',p.X-30,p.Y+3); }
+  var pl3=project(0,0,1500); ctx.fillText('depth z (m)',pl3.X-64,pl3.Y);
+}
+function surfacePlane(){ // z=0 translucent water surface
+  var q=[project(0,0,0),project(DOMX,0,0),project(DOMX,DOMY,0),project(0,DOMY,0)];
+  ctx.beginPath(); ctx.moveTo(q[0].X,q[0].Y);
+  for(var i=1;i<4;i++)ctx.lineTo(q[i].X,q[i].Y); ctx.closePath();
+  ctx.fillStyle='rgba(90,180,220,.10)'; ctx.fill();
+  ctx.strokeStyle='rgba(120,210,240,.25)'; ctx.stroke();
+}
+// seabed surface (shaded quads)
+var BX=46, BY=26, bnodes=null;
+function buildBathy(){
+  bnodes=[];
+  for(var j=0;j<=BY;j++){ var row=[]; for(var i=0;i<=BX;i++){
+    var x=i/BX*DOMX, y=j/BY*DOMY, b=bathy(x,y);
+    row.push({x:x,y:y,z:b[0],dx:b[1],dy:b[2]});
+  } bnodes.push(row);}
+}
+function drawBathy(){
+  var Lx=0.4,Ly=0.3,Lz=-0.87; // light dir (z down -> negative points up toward surface)
+  var quads=[];
+  for(var j=0;j<BY;j++)for(var i=0;i<BX;i++){
+    var a=bnodes[j][i],b=bnodes[j][i+1],c=bnodes[j+1][i+1],d=bnodes[j+1][i];
+    var pa=project(a.x,a.y,a.z),pb=project(b.x,b.y,b.z),pc=project(c.x,c.y,c.z),pd=project(d.x,d.y,d.z);
+    var dep=(pa.depth+pb.depth+pc.depth+pd.depth)/4;
+    var cx=(a.dx+b.dx+c.dx+d.dx)/4, cy=(a.dy+b.dy+c.dy+d.dy)/4;
+    var nx=-cx,ny=-cy,nz=1,nl=Math.hypot(nx,ny,nz); nx/=nl;ny/=nl;nz/=nl;
+    var lit=Math.max(0.18, nx*Lx+ny*Ly+nz*Lz);
+    var zAvg=(a.z+b.z+c.z+d.z)/4;
+    var rim=Math.max(0,(1800-zAvg)/1800); // shallow -> brighter (seamount tops)
+    var rr=(150+70*rim)*lit+30*rim, gg=(135+55*rim)*lit+26*rim, bb=(88+20*rim)*lit;
+    quads.push({dep:dep, p:[pa,pb,pc,pd], col:'rgb('+(rr|0)+','+(gg|0)+','+(bb|0)+')'});
+  }
+  quads.sort(function(a,b){return b.dep-a.dep;});
+  for(var q=0;q<quads.length;q++){
+    var Q=quads[q];
+    ctx.beginPath(); ctx.moveTo(Q.p[0].X,Q.p[0].Y);
+    for(var i=1;i<4;i++)ctx.lineTo(Q.p[i].X,Q.p[i].Y); ctx.closePath();
+    ctx.fillStyle=Q.col; ctx.fill();
+    ctx.strokeStyle='rgba(60,50,30,.25)'; ctx.lineWidth=0.5; ctx.stroke();
+  }
+  // seabed label
+  var sp=project(18000,12000,bathy(18000,12000)[0]);
+  ctx.fillStyle='#f0e0b0'; ctx.font='11px sans-serif'; ctx.fillText('seamount',sp.X-18,sp.Y-4);
+  var sp2=project(34000,9000,bathy(34000,9000)[0]);
+  ctx.fillText('seamount',sp2.X-18,sp2.Y-4);
+  var sp3=project(46000,20000,2500); ctx.fillStyle='#c8b888'; ctx.fillText('seabed',sp3.X,sp3.Y);
+}
+// insonified volume â rendered as continuous volumetric fog: each voxel is
+// splatted as a large soft gaussian blob into a half-resolution buffer
+// (additive), then upscaled onto the scene; neighbouring blobs merge so no
+// grid is visible and acoustic energy reads as a glowing haze.
+var fogTeal=null, fogJet=null, FOGJET_N=24;
+var fogCv=document.createElement('canvas'), fogCtx=fogCv.getContext('2d');
+function makeFogSprite(r,g,b){
+  var s=64, cv=document.createElement('canvas'); cv.width=cv.height=s;
+  var c=cv.getContext('2d'), m=s/2;
+  function tint(mix,a){ // mix toward white
+    var rr=r+(255-r)*mix|0, gg=g+(255-g)*mix|0, bb=b+(255-b)*mix|0;
+    return 'rgba('+rr+','+gg+','+bb+','+a+')';
+  }
+  var g2=c.createRadialGradient(m,m,0,m,m,m);
+  g2.addColorStop(0,tint(0.12,0.55));
+  g2.addColorStop(0.35,tint(0.02,0.26));
+  g2.addColorStop(0.7,tint(0,0.08));
+  g2.addColorStop(1,tint(0,0));
+  c.fillStyle=g2; c.fillRect(0,0,s,s);
+  return cv;
+}
+function buildVoxelSprites(){
+  fogTeal=makeFogSprite(55,224,192);
+  fogJet=[];
+  for(var i=0;i<FOGJET_N;i++){
+    var c=jetRGB(i/(FOGJET_N-1));
+    fogJet.push(makeFogSprite(c[0],c[1],c[2]));
+  }
+}
+function drawVolume(){
+  if(anim.opacity<=0.001||!data) return;
+  var dx=DOMX/VX, dy=DOMY/VY, dz=DOMZ/VZ;
+  var fw=Math.max(2,W>>1), fh=Math.max(2,H>>1);
+  if(fogCv.width!==fw||fogCv.height!==fh){ fogCv.width=fw; fogCv.height=fh; }
+  fogCtx.clearRect(0,0,fw,fh);
+  fogCtx.globalCompositeOperation='lighter';
+  var cells=[], dmin=1e9, dmax=-1e9;
+  for(var vz=0;vz<VZ;vz++)for(var vy=0;vy<VY;vy++)for(var vx=0;vx<VX;vx++){
+    var id=vx+VX*(vy+VY*vz), tl=data.coarse[id];
+    if(tl>TL_CUTOFF) continue; // shadow -> empty/dark
+    // deterministic per-cell jitter breaks the lattice so the fog looks organic
+    var h=(vx*73856093)^(vy*19349663)^(vz*83492791);
+    var jx=((h&255)/255-0.5)*0.6, jy=(((h>>8)&255)/255-0.5)*0.6, jz=(((h>>16)&255)/255-0.5)*0.6;
+    var p=project((vx+0.5+jx)*dx,(vy+0.5+jy)*dy,(vz+0.5+jz)*dz);
+    if(p.depth<dmin)dmin=p.depth; if(p.depth>dmax)dmax=p.depth;
+    cells.push({dep:p.depth, X:p.X, Y:p.Y, tl:tl});
+  }
+  var sz=cam.zoom*0.052, dspan=Math.max(1e-6,dmax-dmin);
+  for(var i=0;i<cells.length;i++){
+    var C=cells[i];
+    var t=Math.min(1,Math.max(0,(TL_CUTOFF-C.tl)/50));       // signal strength 0..1
+    var near=(dmax-C.dep)/dspan;                             // 1 = closest to camera
+    var img=anim.colorByTL
+      ? fogJet[Math.round(Math.min(1,Math.max(0,(90-C.tl)/60))*(FOGJET_N-1))]
+      : fogTeal;
+    fogCtx.globalAlpha=Math.min(1, anim.opacity*(0.28+0.62*t)*(0.55+0.45*near));
+    var s=sz*3.4*(0.75+0.55*t)*0.5;                          // *0.5: half-res buffer
+    fogCtx.drawImage(img, C.X*0.5-s/2, C.Y*0.5-s/2, s, s);
+  }
+  fogCtx.globalAlpha=1; fogCtx.globalCompositeOperation='source-over';
+  ctx.globalCompositeOperation='lighter';
+  ctx.drawImage(fogCv,0,0,W,H);
+  ctx.globalCompositeOperation='source-over';
+}
+// rays (revealed up to anim.time)
+function drawRays(){
+  if(!data) return;
+  var E=data.E, A=data.A;
+  var strideE=Math.max(1,Math.ceil(E/22)), strideA=Math.max(1,Math.ceil(A/16));
+  for(var ie=0;ie<E;ie+=strideE)for(var ia=0;ia<A;ia+=strideA){
+    var r=data.rays[ie*A+ia];
+    var col=elevColor(r.elev,0.85);
+    ctx.strokeStyle=col; ctx.lineWidth=1;
+    ctx.beginPath();
+    var started=false, lastX=0,lastY=0, frontDrawn=false, fx=0,fy=0;
+    for(var k=0;k<r.n;k+=1){
+      if(r.ts[k]>anim.time) break;
+      var p=project(r.xs[k],r.ys[k],r.zs[k]);
+      if(!started){ctx.moveTo(p.X,p.Y);started=true;} else ctx.lineTo(p.X,p.Y);
+      fx=p.X;fy=p.Y;frontDrawn=true;
+    }
+    ctx.stroke();
+    if(frontDrawn){ // wavefront leading dot
+      ctx.fillStyle=elevColor(r.elev,1);
+      ctx.beginPath(); ctx.arc(fx,fy,1.8,0,7); ctx.fill();
+    }
+  }
+  // highlight eigenrays distinctly (full path, thick white)
+  if(data.eig.length){
+    for(var e=0;e<data.eigRays.length;e++){
+      var r=data.eigRays[e];
+      ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.lineWidth=2;
+      ctx.beginPath(); var st=false;
+      for(var k=0;k<r.n;k++){ if(r.ts[k]>anim.time)break; var p=project(r.xs[k],r.ys[k],r.zs[k]);
+        if(!st){ctx.moveTo(p.X,p.Y);st=true;}else ctx.lineTo(p.X,p.Y);} ctx.stroke();
+    }
+  }
+}
+function glowSphere(x,y,z,col,label,ring){
+  var p=project(x,y,z);
+  var g=ctx.createRadialGradient(p.X,p.Y,0,p.X,p.Y,16);
+  g.addColorStop(0,col); g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(p.X,p.Y,16,0,7); ctx.fill();
+  ctx.fillStyle=col; ctx.beginPath(); ctx.arc(p.X,p.Y,4.5,0,7); ctx.fill();
+  if(ring){ ctx.strokeStyle=ring; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(p.X,p.Y,11,0,7); ctx.stroke(); }
+  ctx.fillStyle='#fff'; ctx.font='bold 12px sans-serif'; ctx.fillText(label,p.X+13,p.Y-8);
+}
+function drawColorbar(){
+  if(!anim.colorByTL) return;
+  var x=16, y0=Math.round(H*0.5-75), h=150, w=14;
+  for(var i=0;i<h;i++){ var t=i/h; ctx.fillStyle=jet(t); ctx.fillRect(x,y0+i,w,1); }
+  ctx.fillStyle='#cfe6ff'; ctx.font='9px sans-serif';
+  ctx.fillText('30 dB',x+w+2,y0+6); ctx.fillText('90 dB',x+w+2,y0+h);
+  ctx.fillText('TL',x,y0-4);
+}
+
+//============================ CROSS-SECTION (y=12 km) ============================
+function drawXsec(){
+  var w=xsec.width,h=xsec.height;
+  xctx.fillStyle='#02040a'; xctx.fillRect(0,0,w,h);
+  var padL=8,padR=8,padT=14,padB=16;
+  var pw=w-padL-padR, ph=h-padT-padB;
+  function sx(x){return padL+x/DOMX*pw;}
+  function sz(z){return padT+z/DOMZ*ph;}
+  // seabed profile at y=12km
+  xctx.beginPath(); xctx.moveTo(sx(0),sz(bathy(0,12000)[0]));
+  for(var x=0;x<=DOMX;x+=500) xctx.lineTo(sx(x),sz(bathy(x,12000)[0]));
+  xctx.lineTo(sx(DOMX),sz(DOMZ)); xctx.lineTo(sx(0),sz(DOMZ)); xctx.closePath();
+  xctx.fillStyle='#3a3320'; xctx.fill();
+  xctx.strokeStyle='#c8b070'; xctx.lineWidth=1; xctx.stroke();
+  // surface
+  xctx.strokeStyle='rgba(120,210,240,.5)'; xctx.beginPath(); xctx.moveTo(sx(0),sz(0)); xctx.lineTo(sx(DOMX),sz(0)); xctx.stroke();
+  // centerline rays (|az|<1.5 deg). Only draw each ray WHILE it stays in the
+  // y=12 km plane (|y-12000|<1500 m). Once a sloped (off-centerline) seabed
+  // bounce deflects it out of plane, stop drawing â otherwise its x-z trace,
+  // plotted against the y=12 km seabed profile, would falsely appear to pass
+  // through the (off-plane) seamount. This keeps the section physically honest.
+  if(data){
+    for(var i=0;i<data.rays.length;i++){
+      var r=data.rays[i]; if(Math.abs(r.az/DEG)>1.5) continue;
+      xctx.strokeStyle=elevColor(r.elev,0.8); xctx.lineWidth=0.7; xctx.beginPath();
+      var started=false;
+      for(var k=0;k<r.n;k++){
+        if(r.ts[k]>anim.time) break;
+        if(Math.abs(r.ys[k]-12000)>1500) break;   // left the centerline plane
+        var X=sx(r.xs[k]),Z=sz(r.zs[k]);
+        if(!started){xctx.moveTo(X,Z);started=true;} else xctx.lineTo(X,Z);
+      }
+      xctx.stroke();
+    }
+  }
+  // sound speed profile (right inset)
+  xctx.strokeStyle='#7fd0ff'; xctx.lineWidth=1; xctx.beginPath();
+  for(var z=0;z<=DOMZ;z+=50){ var cc=cofz(z); var X=padL+pw-30+(cc-1490)/60*28; var Z=sz(z); if(z===0)xctx.moveTo(X,Z);else xctx.lineTo(X,Z);} xctx.stroke();
+  // S and R
+  xctx.fillStyle='#ffe6b0'; xctx.beginPath(); xctx.arc(sx(S.x),sz(S.z),3,0,7); xctx.fill();
+  xctx.fillStyle='#4fe8ff'; xctx.beginPath(); xctx.arc(sx(R.x),sz(R.z),3,0,7); xctx.fill();
+  xctx.fillStyle='#cfe6ff'; xctx.font='9px sans-serif';
+  xctx.fillText('Cross-section y=12 km  (S, R proj; c(z) blue)',padL,10);
+  xctx.fillText('S',sx(S.x)+4,sz(S.z)); xctx.fillText('R*',sx(R.x)+4,sz(R.z));
+}
+
+//============================ ARRIVALS STEM PLOT ============================
+function drawStem(){
+  var w=stem.width,h=stem.height;
+  sctx.fillStyle='#02040a'; sctx.fillRect(0,0,w,h);
+  if(!data||!data.eig.length){ sctx.fillStyle='#ffb454'; sctx.font='10px sans-serif';
+    sctx.fillText('no SâR eigenrays within '+EIG_TOL+' m',6,h/2); return; }
+  var tmin=1e9,tmax=-1e9,tlmin=1e9,tlmax=-1e9,best=null;
+  data.eig.forEach(function(e){ tmin=Math.min(tmin,e.t);tmax=Math.max(tmax,e.t);tlmin=Math.min(tlmin,e.tl);tlmax=Math.max(tlmax,e.tl);
+    if(!best||e.tl<best.tl)best=e;});
+  if(tmax-tmin<0.01){tmin-=0.5;tmax+=0.5;} if(tlmax-tlmin<1){tlmin-=5;tlmax+=5;}
+  var tpad=(tmax-tmin)*0.06; tmin-=tpad; tmax+=tpad;   // keep cluster off the edges
+  var x0=24,x1=w-6,y0=13,y1=h-13;
+  sctx.strokeStyle='#274'; sctx.beginPath(); sctx.moveTo(x0,y1); sctx.lineTo(x1,y1); sctx.stroke();
+  sctx.strokeStyle='rgba(39,68,68,.5)'; sctx.setLineDash([2,3]);
+  sctx.beginPath(); sctx.moveTo(x0,y0); sctx.lineTo(x1,y0); sctx.stroke(); sctx.setLineDash([]);
+  data.eig.forEach(function(e){
+    var x=x0+(e.t-tmin)/(tmax-tmin)*(x1-x0);
+    var yy=y0+(e.tl-tlmin)/(tlmax-tlmin)*(y1-y0); // lower TL -> higher stem (top)
+    var col=elevColor(e.elev,0.9);
+    sctx.strokeStyle=col; sctx.lineWidth=1.5; sctx.beginPath(); sctx.moveTo(x,y1); sctx.lineTo(x,yy); sctx.stroke();
+    sctx.fillStyle=col; sctx.beginPath(); sctx.arc(x,yy,2.2,0,7); sctx.fill();
+  });
+  // strongest arrival: white ring + label
+  if(best){
+    var bx=x0+(best.t-tmin)/(tmax-tmin)*(x1-x0);
+    var by=y0+(best.tl-tlmin)/(tlmax-tlmin)*(y1-y0);
+    sctx.strokeStyle='#fff'; sctx.lineWidth=1; sctx.beginPath(); sctx.arc(bx,by,3.6,0,7); sctx.stroke();
+    sctx.fillStyle='#eafff0'; sctx.font='8px sans-serif';
+    var lbl=best.t.toFixed(2)+'s '+best.tl.toFixed(1)+'dB';
+    var lx=Math.min(Math.max(bx+5,x0),x1-sctx.measureText(lbl).width);
+    sctx.fillText(lbl,lx,Math.max(by-5,8));
+  }
+  sctx.fillStyle='#8fb2d8'; sctx.font='8px sans-serif';
+  sctx.fillText(tlmin.toFixed(0)+'dB',1,y0+3); sctx.fillText(tlmax.toFixed(0)+'dB',1,y1+3);
+  sctx.fillText(tmin.toFixed(1)+'s',x0,h-3); sctx.fillText(tmax.toFixed(1)+'s',w-26,h-3);
+  sctx.fillText(data.eig.length+' arr',w-26,8);
+}
+
+//============================ MAIN RENDER ============================
+function renderScene(){
+  // water vertical gradient
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#0f3a55'); g.addColorStop(0.35,'#0a2338'); g.addColorStop(1,'#03060e');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  boxEdges();
+  surfacePlane();
+  drawBathy();
+  drawVolume();
+  drawRays();
+  glowSphere(S.x,S.y,S.z,'rgba(255,230,176,1)','S',null);
+  var ring = data ? (data.reached?'#33e060':'#ff4d4d') : '#888';
+  glowSphere(R.x,R.y,R.z,'rgba(79,232,255,1)','R',ring);
+  drawColorbar();
+  drawXsec();
+}
+
+//============================ ANIMATION LOOP ============================
+function loop(ts){
+  if(!perf.last)perf.last=ts;
+  var dt=(ts-perf.last)/1000; perf.last=ts;
+  perf.acc+=dt; perf.frames++;
+  if(perf.acc>=0.5){ perf.fps=perf.frames/perf.acc; perf.frames=0; perf.acc=0; updateMetricsCard(); }
+  if(anim.playing && data){
+    anim.time+=dt*anim.speed*(data.maxT/14);
+    if(anim.time>=data.maxT){ anim.time=data.maxT; }
+    document.getElementById('scrub').value=Math.round(anim.time/data.maxT*1000);
+    document.getElementById('tLbl').textContent=anim.time.toFixed(1)+' s';
+  }
+  renderScene();
+  updateCamHud();
+  requestAnimationFrame(loop);
+}
+
+var CAM_ZOOM0=330;
+function updateCamHud(){
+  var yawD=((cam.yaw/DEG)%360+360)%360;
+  var el=document.getElementById('camhud');
+  el.textContent='camÂ Â yaw '+Math.round(yawD)+'Â° Â· pitch '+
+    Math.round(cam.pitch/DEG)+'Â° Â· zoom '+(cam.zoom/CAM_ZOOM0).toFixed(2)+'Ã';
+}
+
+//============================ METRICS ============================
+function fmt(v,d){ return (v==null)?'â':v.toFixed(d===undefined?1:d); }
+function kpiCard(lab,val,unit,ac,opt){
+  opt=opt||{};
+  var h='<div class="kpi'+(opt.wide?' wide':'')+'" style="--ac:'+ac+'">';
+  h+='<div class="lab">'+lab+'</div>';
+  h+='<div class="val">'+val+(unit?'<small>'+unit+'</small>':'')+(opt.suffix||'')+'</div>';
+  if(opt.bar!=null) h+='<div class="bar"><i style="width:'+Math.max(0,Math.min(100,opt.bar))+'%;background:'+ac+'"></i></div>';
+  return h+'</div>';
+}
+function updateMetricsCard(){
+  if(!data){return;}
+  var off=(data.E!==CANON_E||data.A!==CANON_A);
+  document.getElementById('offflag').style.display=off?'inline-flex':'none';
+  var reached=data.reached;
+  var eigTxt = data.eig.length
+    ? data.eig.slice(0,4).map(function(e){return e.t.toFixed(2)+'s Â· '+e.tl.toFixed(1)+'dB';}).join('&nbsp;&nbsp; ')
+    : 'none within '+EIG_TOL+' m';
+  var sc=selfchk.done;
+  var h='';
+  // hero â reachability
+  h+='<div class="hero '+(reached?'yes':'no')+'">'
+    +'<div class="dot"></div>'
+    +'<div class="hmain"><div class="hlab">Receiver R</div><div class="hbig">'+(reached?'REACHED':'SHADOWED')+'</div></div>'
+    +'<div class="hstats">'
+    +'<div><span>TL(R)</span><b>'+fmt(data.tgtTL,1)+'<small>dB</small></b></div>'
+    +'<div><span>miss</span><b>'+fmt(data.miss,0)+'<small>m</small></b></div>'
+    +'</div></div>';
+  // coverage
+  h+='<div class="sect">Coverage</div><div class="grid">';
+  h+=kpiCard('Insonified',fmt(data.insonFrac*100,1),'%','#37e0c0',
+      {wide:true,bar:data.insonFrac*100,suffix:' <span class="mut">/ '+fmt(data.shadowFrac*100,1)+'% shadow</span>'});
+  h+='</div>';
+  // 3D fidelity
+  h+='<div class="sect">3D fidelity</div><div class="grid">';
+  h+=kpiCard('Out-of-plane |Îy|',fmt(data.maxDy,0),'m','#a78bfa');
+  h+=kpiCard('Snell drift',data.maxSnell.toExponential(1),'','#a78bfa');
+  h+='</div>';
+  // self-checks
+  h+='<div class="sect">Self-checks</div><div class="grid">';
+  h+=kpiCard('SâR eigenrays',data.eig.length,'','#4f93ff');
+  h+=kpiCard('Reciprocity',sc?fmt(selfchk.reciErr,2):'â¦','dB','#4f93ff');
+  h+=kpiCard('Î insonified (2Ã)',sc?fmt(selfchk.dInson*100,2):'â¦','%','#ffb454');
+  h+=kpiCard('Î TL(R) (2Ã)',sc?fmt(selfchk.dTL,2):'â¦','dB','#ffb454');
+  h+='</div>';
+  // performance
+  h+='<div class="sect">Performance</div><div class="grid">';
+  h+=kpiCard('Frame rate',fmt(perf.fps,0),'fps','#7f9bc0');
+  h+=kpiCard('Rays',data.E+'Ã'+data.A,'','#7f9bc0',{suffix:' <span class="mut">'+(data.E*data.A)+'</span>'});
+  h+=kpiCard('File size',fileKB,'KB','#7f9bc0');
+  h+=kpiCard('Shadow cutoff',TL_CUTOFF,'dB','#7f9bc0');
+  h+='</div>';
+  // arrivals
+  h+='<div class="sect">Arrivals at R &nbsp;<span class="mut" style="text-transform:none;letter-spacing:0">travel&nbsp;time Â· TL</span></div>';
+  h+='<div class="arr">'+eigTxt+'</div>';
+  document.getElementById('mBody').innerHTML=h;
+}
+function postMetrics(){
+  if(!data||!data.comp) return;
+  var payload={ type:'ray_metrics',
+    reached:data.reached, missDistM:data.miss, TL_R_dB:data.tgtTL,
+    insonifiedFrac:data.insonFrac, shadowFrac:data.shadowFrac,
+    maxOutOfPlaneDyM:data.maxDy, maxSnellDrift:data.maxSnell,
+    fps:perf.fps, fileKB:fileKB, rayCount:{elev:data.E,az:data.A,total:data.E*data.A},
+    eigenrays:data.eig.map(function(e){return {t:e.t,tl:e.tl,elev:e.elev,az:e.az};}),
+    reciprocityErrDB:selfchk.reciErr, convDInsonFrac:selfchk.dInson, convDTL_R_dB:selfchk.dTL,
+    tlCutoffDB:TL_CUTOFF, offCanonical:(data.E!==CANON_E||data.A!==CANON_A),
+    grid:{nx:NX,ny:NY,nz:NZ}, tlField:data.comp };
+  try{ window.parent.postMessage(payload,'*'); }catch(e){}
+}
+
+//============================ BUILD / RECOMPUTE ============================
+function computeFan(E,A){
+  data=traceFan(S,E,A,R,true);
+  // resolve eigenray ray objects for highlighting
+  data.eigRays=[];
+  for(var i=0;i<data.rays.length;i++){
+    var r=data.rays[i], best=1e12;
+    for(var k=0;k<r.n;k++){ var d=Math.hypot(r.xs[k]-R.x,r.ys[k]-R.y,r.zs[k]-R.z); if(d<best)best=d; }
+    if(best<EIG_TOL) data.eigRays.push(r);
+  }
+  anim.time=0; anim.playing=false; document.getElementById('play').textContent='â¶ Play';
+  document.getElementById('play').classList.remove('on');
+  updateMetricsCard(); drawStem(); postMetrics();
+}
+function runSelfChecks(){
+  // reciprocity: fan from R aimed toward S (az0=PI, i.e. -x) -> TL at S
+  var rev=traceFan(R,CANON_E,CANON_A,S,false,Math.PI);
+  selfchk.reciErr=Math.abs(data.tgtTL-rev.tgtTL);
+  // convergence: 2x beams
+  var c2=traceFan(S, CANON_E*2-1, CANON_A*2-1, R, false);
+  selfchk.dInson=c2.insonFrac-data.insonFrac;
+  selfchk.dTL=c2.tgtTL-data.tgtTL;
+  selfchk.done=true;
+  updateMetricsCard(); postMetrics();
+}
+
+//============================ CONTROLS ============================
+function estimateFileSize(){ try{ fileKB=Math.round(new Blob([document.documentElement.outerHTML]).size/1024); }catch(e){ fileKB=0; } }
+
+var $=function(id){return document.getElementById(id);};
+$('play').onclick=function(){ if(!data)return; anim.playing=!anim.playing;
+  this.textContent=anim.playing?'â¸ Pause':'â¶ Play'; this.classList.toggle('on',anim.playing);
+  if(anim.playing&&anim.time>=data.maxT) anim.time=0; };
+$('reset').onclick=function(){ anim.playing=false; anim.time=0; $('play').textContent='â¶ Play'; $('play').classList.remove('on'); $('scrub').value=0; $('tLbl').textContent='0.0 s'; };
+$('camreset').onclick=function(){ cam.yaw=0.62; cam.pitch=0.46; cam.zoom=330; };
+$('canon').onclick=function(){ $('elevBeams').value=CANON_E; $('azBeams').value=CANON_A; $('eN').textContent=CANON_E; $('aN').textContent=CANON_A; computeFan(CANON_E,CANON_A); };
+$('tltoggle').onclick=function(){ anim.colorByTL=!anim.colorByTL; this.textContent='Color: '+(anim.colorByTL?'TL dB':'Glow'); };
+$('elevBeams').addEventListener('input',function(){ $('eN').textContent=this.value; });
+$('azBeams').addEventListener('input',function(){ $('aN').textContent=this.value; });
+$('elevBeams').addEventListener('change',function(){ computeFan(+$('elevBeams').value,+$('azBeams').value); });
+$('azBeams').addEventListener('change',function(){ computeFan(+$('elevBeams').value,+$('azBeams').value); });
+$('scrub').addEventListener('input',function(){ if(!data)return; anim.time=this.value/1000*data.maxT; $('tLbl').textContent=anim.time.toFixed(1)+' s'; });
+$('speed').addEventListener('input',function(){ anim.speed=+this.value; $('spdLbl').textContent=(+this.value).toFixed(1)+'x'; });
+$('opacity').addEventListener('input',function(){ anim.opacity=+this.value; $('opLbl').textContent=(+this.value).toFixed(2); });
+
+window.addEventListener('message',function(e){
+  var d=e.data||{}, t=d.type, v, btn;
+  if(t==='hide_ui'||t==='hide_controls'){
+    v=t==='hide_ui'&&d.hidden===false?'':'none';
+    ['controls','metrics','camhud'].forEach(function(id){var el=$(id); if(el)el.style.display=v;});
+  } else if(t==='play'){
+    if(!anim.playing){btn=$('play'); if(btn)btn.click();}
+  } else if(t==='pause'){
+    if(anim.playing){btn=$('play'); if(btn)btn.click();}
+  } else if(t==='reset'){
+    btn=$('reset'); if(btn)btn.click();
+  } else if(t==='reset_camera'){
+    btn=$('camreset'); if(btn)btn.click();
+  } else if(t==='set_stop'){
+    if(d.elev!=null){$('elevBeams').value=d.elev; $('eN').textContent=d.elev;}
+    if(d.azim!=null){$('azBeams').value=d.azim; $('aN').textContent=d.azim;}
+    computeFan(+$('elevBeams').value,+$('azBeams').value);
+  } else if(t==='set_speed'){
+    anim.speed=Math.min(4,Math.max(0.25,+d.speed||1));
+    $('speed').value=anim.speed; $('spdLbl').textContent=anim.speed.toFixed(2).replace(/\.00$/,'')+'x';
+  } else if(t==='set_time'){
+    if(!data)return;
+    anim.playing=false;
+    anim.time=Math.max(0,Math.min(1,+d.t||0))*data.maxT;
+    $('play').textContent='Play'; $('play').classList.remove('on');
+    $('scrub').value=Math.round((data.maxT?anim.time/data.maxT:0)*1000);
+    $('tLbl').textContent=anim.time.toFixed(1)+' s';
+  } else if(t==='set_opacity'){
+    anim.opacity=Math.min(1,Math.max(0,+d.v||0));
+    $('opacity').value=anim.opacity; $('opLbl').textContent=anim.opacity.toFixed(2);
+  } else if(t==='request_metrics'){
+    postMetrics();
+  }
+});
+
+// camera orbit + zoom
+var dragging=false,lx=0,ly=0;
+main.addEventListener('mousedown',function(e){dragging=true;lx=e.clientX;ly=e.clientY;});
+window.addEventListener('mouseup',function(){dragging=false;});
+window.addEventListener('mousemove',function(e){ if(!dragging)return; cam.yaw+=(e.clientX-lx)*0.01; cam.pitch+=(e.clientY-ly)*0.01; cam.pitch=Math.max(-1.5,Math.min(1.5,cam.pitch)); lx=e.clientX;ly=e.clientY;});
+main.addEventListener('wheel',function(e){e.preventDefault(); cam.zoom*=(e.deltaY<0?1.1:0.9); cam.zoom=Math.max(80,Math.min(1600,cam.zoom));},{passive:false});
+// touch
+var pinch=0;
+main.addEventListener('touchstart',function(e){ if(e.touches.length===1){dragging=true;lx=e.touches[0].clientX;ly=e.touches[0].clientY;} else if(e.touches.length===2){pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);} },{passive:false});
+main.addEventListener('touchmove',function(e){ e.preventDefault(); if(e.touches.length===1&&dragging){ cam.yaw+=(e.touches[0].clientX-lx)*0.01; cam.pitch+=(e.touches[0].clientY-ly)*0.01; cam.pitch=Math.max(-1.5,Math.min(1.5,cam.pitch)); lx=e.touches[0].clientX;ly=e.touches[0].clientY;} else if(e.touches.length===2){ var d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY); if(pinch)cam.zoom*=d/pinch; cam.zoom=Math.max(80,Math.min(1600,cam.zoom)); pinch=d; } },{passive:false});
+main.addEventListener('touchend',function(){dragging=false;pinch=0;});
+
+//============================ INIT ============================
+buildBathy();
+buildVoxelSprites();
+estimateFileSize();
+computeFan(CANON_E,CANON_A);
+requestAnimationFrame(loop);
+setTimeout(runSelfChecks,60);   // deferred so first paint is immediate
+</script>
+</body>
+</html>

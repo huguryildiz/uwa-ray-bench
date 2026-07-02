@@ -1,0 +1,12 @@
+{
+  "note": "WP5 golden canonical (41x31) coreRMSE per model",
+  "capturedFrom": "http://127.0.0.1:58806/",
+  "capturedAt": "2026-07-02T15:21:27.929Z",
+  "models": {
+    "fugu": 12.330999007231432,
+    "opus": 12.566784444023911,
+    "gpt": 8.538115647800014,
+    "gemini": 23.104599035879097,
+    "fable": 10.015420281372718
+  }
+}

@@ -498,6 +498,8 @@ ASSUMPTIONS AND NUMERICAL MODEL
         bottom: 8px;
       }
     }
+    /* Harness-controlled clean view: the simulation sidebar owns all controls. */
+    .topbar, #metrics, #statusPanel, #cameraHud { display: none !important; }
   </style>
 </head>
 <body>
@@ -541,6 +543,7 @@ ASSUMPTIONS AND NUMERICAL MODEL
           </label>
           <label class="speed" for="speedSelect">Speed
             <select id="speedSelect">
+              <option value="0.25">0.25x</option>
               <option value="0.5">0.5x</option>
               <option value="1" selected>1x</option>
               <option value="2">2x</option>
@@ -2153,7 +2156,7 @@ ASSUMPTIONS AND NUMERICAL MODEL
       state.lastFrameMs = now;
       if (state.playing) {
         const speed = Number(speedSelect.value);
-        state.currentTime = Math.min(state.maxTime, state.currentTime + dt * speed);
+        state.currentTime = Math.min(state.maxTime, state.currentTime + dt * speed * (state.maxTime / 14));
         if (state.currentTime >= state.maxTime) {
           state.playing = false;
           playBtn.textContent = "Play";
@@ -2427,6 +2430,7 @@ ASSUMPTIONS AND NUMERICAL MODEL
       soundSpeed,
       bathymetry,
       bathymetryGradient,
+      state,
       camera,
       constants: { DOMAIN, SOURCE, RECEIVER, CANONICAL, GRID, CAMERA_HOME, CAMERA_FRAME }
     };
@@ -2444,7 +2448,7 @@ ASSUMPTIONS AND NUMERICAL MODEL
       v=d.hidden?'none':'';
       ALL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display=v;});});
     } else if(t==='hide_controls'){
-      CTRL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display='none';});});
+      ALL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display='none';});});
     } else if(t==='play'){
       btn=document.getElementById('playBtn'); if(btn&&btn.textContent==='Play')btn.click();
     } else if(t==='pause'){
@@ -2460,9 +2464,16 @@ ASSUMPTIONS AND NUMERICAL MODEL
     } else if(t==='set_speed'){
       ss=document.getElementById('speedSelect');
       if(ss){
-        opts=['0.5','1','2','4']; nearest='1'; minD=Infinity;
+        opts=['0.25','0.5','1','2','4']; nearest='1'; minD=Infinity;
         opts.forEach(function(o){var dv=Math.abs(+o-(+d.speed||1));if(dv<minD){minD=dv;nearest=o;}});
         ss.value=nearest; ss.dispatchEvent(new Event('change'));
+      }
+    } else if(t==='set_time'){
+      if(window.rayViewDebug&&window.rayViewDebug.state){
+        window.rayViewDebug.state.playing=false;
+        window.rayViewDebug.state.currentTime=Math.max(0,Math.min(1,+d.t||0))*window.rayViewDebug.state.maxTime;
+        ss=document.getElementById('timeSlider');
+        if(ss){ss.value=String(window.rayViewDebug.state.currentTime); ss.dispatchEvent(new Event('input'));}
       }
     } else if(t==='set_opacity'){
       os=document.getElementById('opacitySlider');

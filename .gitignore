@@ -9,5 +9,11 @@ __pycache__/
 # macOS
 .DS_Store
 
+# Local agent artifacts
+.superpowers/
+.playwright-cli/
+output/
+AGENTS.md
+
 # Reference data is shipped (55 MB of .bin + manifest) — KEEP it tracked.
 # If it ever grows past GitHub limits, move reference/data/ to Git LFS.

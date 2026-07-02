@@ -74,6 +74,8 @@
   .toggleRow{display:flex;gap:8px;align-items:center;}
   .chk{display:flex;align-items:center;gap:4px;font-size:10px;color:#9fc0e2;cursor:pointer;}
   .hint{position:absolute;left:10px;top:172px;z-index:4;font-size:10px;color:#5d7ea0;max-width:200px;}
+  /* Harness-controlled clean view: the simulation sidebar owns all controls. */
+  #controls, #metrics, .hint { display:none !important; }
 </style>
 </head>
 <body>
@@ -938,7 +940,7 @@ function frame(ts){
   if(!lastTs)lastTs=ts; const dtw=(ts-lastTs)/1000; lastTs=ts;
   fpsAcc+=dtw;fpsN++; if(fpsAcc>0.5){lastFps=Math.round(fpsN/fpsAcc);fpsAcc=0;fpsN=0;document.getElementById('fps').textContent=lastFps+' fps';}
   if(playing && STATE){
-    animClock+=dtw*speed; Tfront=animClock;
+    animClock+=dtw*speed*(STATE.Tmax/14); Tfront=animClock;
     if(Tfront>=STATE.Tmax){Tfront=STATE.Tmax; playing=false; document.getElementById('btnPlay').textContent='▶ Play';}
     const frac=STATE.Tmax>0?Tfront/STATE.Tmax:0;
     document.getElementById('slTime').value=Math.round(frac*1000);
@@ -990,6 +992,7 @@ function recompute(){
   $('overlay').classList.remove('hidden'); $('overlay').textContent='Computing rays…';
   setTimeout(()=>{
     STATE=precompute(+$('slEl').value, +$('slAz').value);
+    window.__rayViewState=STATE;
     pushMetrics(STATE);
     camDirty=true; projCacheDirty=true;
     playing=false; animClock=0; Tfront=0; $('btnPlay').textContent='▶ Play'; $('slTime').value=0; $('lblT').textContent='0%';
@@ -1026,7 +1029,16 @@ document.querySelectorAll('.phead').forEach(hd=>hd.addEventListener('click',()=>
 //====================================================================================
 resize(); drawColorbar(); setBeamLabels();
 requestAnimationFrame(frame);
-setTimeout(()=>{ STATE=precompute(41,31); pushMetrics(STATE); camDirty=true; projCacheDirty=true; $('overlay').classList.add('hidden'); },40);
+setTimeout(()=>{ STATE=precompute(41,31); window.__rayViewState=STATE; pushMetrics(STATE); camDirty=true; projCacheDirty=true; $('overlay').classList.add('hidden'); },40);
+window.__rayViewSetTime=function(t){
+  if(!STATE)return;
+  playing=false;
+  Tfront=animClock=Math.max(0,Math.min(1,+t||0))*STATE.Tmax;
+  trailDirty=true;
+  $('btnPlay').textContent='▶ Play';
+  $('slTime').value=Math.round((STATE.Tmax?Tfront/STATE.Tmax:0)*1000);
+  $('lblT').textContent=Math.round((STATE.Tmax?Tfront/STATE.Tmax:0)*100)+'%';
+};
 </script>
 <script>
 (function(){
@@ -1039,7 +1051,7 @@ setTimeout(()=>{ STATE=precompute(41,31); pushMetrics(STATE); camDirty=true; pro
       v=d.hidden?'none':'';
       ALL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display=v;});});
     } else if(t==='hide_controls'){
-      CTRL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display='none';});});
+      ALL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display='none';});});
     } else if(t==='play'){
       btn=document.getElementById('btnPlay'); if(btn&&btn.textContent.indexOf('Play')>=0)btn.click();
     } else if(t==='pause'){
@@ -1055,6 +1067,11 @@ setTimeout(()=>{ STATE=precompute(41,31); pushMetrics(STATE); camDirty=true; pro
     } else if(t==='set_speed'){
       ss=document.getElementById('slSpd');
       if(ss){ss.value=Math.min(400,Math.max(10,Math.round((+d.speed||1)*100))); ss.dispatchEvent(new Event('input'));}
+    } else if(t==='set_time'){
+      if(window.__rayViewSetTime)window.__rayViewSetTime(d.t);
+    } else if(t==='set_volume'){
+      var cb=document.getElementById('ckVol');
+      if(cb){cb.checked=!!d.on; cb.dispatchEvent(new Event('change'));}
     } else if(t==='set_opacity'){
       os=document.getElementById('slOp');
       if(os){os.value=Math.round((+d.v||0)*100); os.dispatchEvent(new Event('input'));}

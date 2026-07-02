@@ -2,11 +2,11 @@
 <!-- ============================================================================
  HARNESS CHROME  (uwa-ray-bench)  — the "final UI" infra shell
  -----------------------------------------------------------------------------
- 2×2 model grid (top 63vh) + BELLHOP3D ref | scorecard row (bottom 32.5vh):
-   Fugu Ultra · Opus 4.8 max  (top row)
-   GPT 5.5 XH · Gemini 3.1 Pro  (second row)
-   BELLHOP3D ref | scorecard  (bottom row — #bottom-row, 2-col)
- The four model panels are opaque outputs — loaded as iframes ONLY, never read.
+ 5-panel model grid (Cinema tab, 3 cols × 2 rows) + BELLHOP3D reference
+ (hidden in Cinema, shown in Compare/Scorecard):
+   Fugu Ultra · Opus 4.8 max · GPT 5.5 XH  (top row)
+   Gemini 3.1 Pro · Fable 5 (Max)  (second row)
+ The five model panels are opaque outputs — loaded as iframes ONLY, never read.
  harness.js aggregates each panel's postMessage({type:'ray_metrics',...}) card +
  canonical-grid TL field and scores every model's TL RMSE / TL(R) error vs the
  BELLHOP3D reference, plus synced camera/beam-stop, diff overlay, scorecard and an
@@ -145,43 +145,74 @@
   #bar.nav-open .ham-ico::before{top:0;transform:rotate(45deg)}
   #bar.nav-open .ham-ico::after{top:0;transform:rotate(-45deg)}
 
-  /* ---------- tabs bar ---------- */
-  #tabs-bar{flex:none;height:44px;display:flex;align-items:center;gap:2px;
-    padding:0 10px;background:rgba(4,6,20,.30);
-    backdrop-filter:var(--blur-sm);-webkit-backdrop-filter:var(--blur-sm);
-    border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:none}
-  #tabs-bar::-webkit-scrollbar{display:none}
+  /* ---------- primary navigation ---------- */
   .tab-btn{appearance:none;background:none;border:0;cursor:pointer;
     color:var(--text-dim);font:600 12px var(--font);letter-spacing:.03em;
-    padding:7px 14px;border-radius:var(--radius-sm);white-space:nowrap;
-    transition:var(--tr);flex:none}
+    padding:8px 12px;border-radius:var(--radius-sm);white-space:nowrap;
+    transition:var(--tr);flex:none;display:inline-flex;align-items:center;gap:6px}
   .tab-btn:hover{color:var(--text);background:rgba(255,255,255,.07)}
   .tab-btn.act{color:var(--accent);background:rgba(57,255,133,.08);
     text-shadow:0 0 12px rgba(57,255,133,.40)}
 
   /* ---------- hero scorecard — always visible compact bar charts ---------- */
-  #hero-score{flex:none;margin:10px 12px 0;display:flex;align-items:center;gap:16px;
+  #hero-score{flex:none;margin:10px 12px 0;display:flex;flex-direction:column;gap:10px;
     padding:11px 18px;border-radius:var(--radius);
     background:rgba(8,10,30,.60);
     backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
     border:1px solid var(--border);
     box-shadow:var(--lift-sm),inset 0 1px 0 rgba(255,255,255,.07)}
+  #hero-card-row{display:flex;align-items:center;gap:16px;width:100%}
   #hero-title{font:700 9px var(--font);letter-spacing:.12em;color:var(--text-dim);
     text-transform:uppercase;flex:none;white-space:nowrap}
-  #hero-bars{display:flex;gap:20px;align-items:flex-end;flex:1;min-width:0}
-  .hbc{display:flex;flex-direction:column;align-items:center;gap:4px}
-  .hbc-label{font:600 7px var(--font);letter-spacing:.12em;text-transform:uppercase;
-    color:var(--text-faint);white-space:nowrap}
-  .hbc-row{display:flex;align-items:flex-end;gap:3px;height:32px}
-  .hbc-bar{width:8px;border-radius:2px 2px 0 0;min-height:2px;transition:height .5s cubic-bezier(.4,0,.2,1)}
-  #winner-badge{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none;
-    padding:7px 13px;border-radius:var(--radius-sm);
+  #hero-bars{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;flex:1;min-width:0}
+  .kpi{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px;
+    padding:9px 10px;border-radius:var(--radius-sm);
+    background:rgba(255,255,255,.035);border:1px solid var(--border);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+  .kpi-h{display:flex;align-items:baseline;justify-content:space-between;gap:4px}
+  .kpi-nm{font:700 8px var(--font);letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kpi-dir{flex:none;font-style:normal;font-size:9px;color:var(--lc);opacity:.7}
+  .kpi-sub{display:flex;align-items:center;gap:4px;min-width:0}
+  .kpi-delta{flex:none;font:600 7px var(--mono);color:var(--lc);
+    padding:1px 4px;border-radius:4px;background:color-mix(in srgb,var(--lc) 14%,transparent)}
+  .kpi-mid{display:flex;align-items:flex-end;justify-content:space-between;gap:10px}
+  .kpi-figs{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .kpi-val{font:600 21px var(--head);color:var(--text);line-height:1;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .kpi-val small{font:600 9px var(--mono);color:var(--text-faint);margin-left:3px}
+  .kpi-leader{flex:none;font:700 7px var(--font);letter-spacing:.05em;text-transform:uppercase;color:var(--lc)}
+  .kpi-bars{display:flex;align-items:flex-end;gap:3px;height:24px;flex:none}
+  .kpi-bar{width:6px;border-radius:2px 2px 0 0;min-height:2px;transition:height .5s cubic-bezier(.4,0,.2,1)}
+  .kpi-bar.ref{background:transparent!important;border:1px dashed var(--accent-cyan);box-shadow:none!important}
+  .kpi-foot{font:500 8px var(--mono);color:var(--text-faint);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em}
+  .kpi-foot b{color:var(--text-dim);font-weight:600}
+  #winner-badge{position:relative;overflow:hidden;display:grid;grid-template-columns:auto 1fr auto;
+    align-items:center;gap:14px;width:100%;flex:none;
+    padding:13px 18px;border-radius:var(--radius-sm);
     border:1px solid rgba(57,255,133,.25);
-    background:rgba(57,255,133,.05)}
-  #winner-badge .wb-tag{font:700 7px var(--font);letter-spacing:.15em;text-transform:uppercase;
-    color:var(--accent);opacity:.65}
-  #winner-badge .wb-name{font:600 13px var(--head);color:var(--accent);
+    background:linear-gradient(90deg,rgba(57,255,133,.12),rgba(45,212,191,.05),rgba(255,255,255,.025));
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 24px color-mix(in srgb,var(--winner,var(--accent)) 16%,transparent);
+    transform:translateZ(0)}
+  #winner-badge::before{content:"";position:absolute;inset:0;
+    background:linear-gradient(115deg,transparent 0 35%,color-mix(in srgb,var(--winner,var(--accent)) 28%,transparent) 48%,transparent 62% 100%);
+    transform:translateX(-120%);animation:leader-sweep 4.8s cubic-bezier(.16,1,.3,1) infinite;pointer-events:none}
+  #winner-badge.has-winner{animation:leader-pulse 2.8s cubic-bezier(.25,1,.5,1) infinite}
+  #winner-badge .wb-tag{position:relative;font:800 10px var(--font);letter-spacing:.18em;text-transform:uppercase;
+    color:var(--winner,var(--accent));opacity:.85}
+  #winner-badge .wb-name{position:relative;font:600 clamp(24px,3vw,42px) var(--head);color:var(--winner,var(--accent));
+    line-height:.95;
     text-shadow:0 0 14px rgba(57,255,133,.45)}
+  #winner-badge .wb-score{position:relative;justify-self:end;font:700 10px var(--mono);letter-spacing:.08em;
+    text-transform:uppercase;color:var(--text-dim);white-space:nowrap}
+  @keyframes leader-sweep{0%,42%{transform:translateX(-120%)}70%,100%{transform:translateX(120%)}}
+  @keyframes leader-pulse{0%,100%{transform:scale(1);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 24px color-mix(in srgb,var(--winner,var(--accent)) 16%,transparent)}
+    50%{transform:scale(1.006);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 0 34px color-mix(in srgb,var(--winner,var(--accent)) 28%,transparent)}}
+  @media (prefers-reduced-motion:reduce){
+    #winner-badge,#winner-badge::before{animation:none}
+    #winner-badge::before{display:none}
+  }
 
   /* ---------- master timeline bar — always visible ---------- */
   #timeline-bar{flex:none;margin:5px 12px 0;display:flex;align-items:center;gap:8px;
@@ -228,40 +259,79 @@
   #compare-info{margin-left:auto;font:500 10px var(--mono);color:var(--text-dim)}
 
   /* ---------- panel grid ---------- */
-  #grid{flex:none;height:calc(100svh - 196px);min-height:240px;display:grid;
+  #grid{flex:none;height:calc(100svh - 312px);min-height:240px;display:grid;
     position:relative;background:rgba(255,255,255,.04);margin:6px 12px 0;
     border-radius:var(--radius);overflow:hidden;
     border:1px solid var(--border);box-shadow:var(--lift)}
-  body.tab-overview #grid{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:3px}
-  body.tab-compare #grid{grid-template-columns:1fr 1fr;grid-template-rows:1fr;height:calc(100svh - 238px)}
+  body.tab-overview #grid{grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr;gap:3px}
+  body.tab-compare #grid{grid-template-columns:1fr 1fr;grid-template-rows:1fr;height:calc(100svh - 354px)}
   body.tab-fugu #grid,body.tab-opus #grid,body.tab-gpt #grid,
-  body.tab-gemini #grid,body.tab-reference #grid{
+  body.tab-gemini #grid,body.tab-fable #grid,body.tab-reference #grid{
     grid-template-columns:1fr;grid-template-rows:1fr}
-  body.tab-scorecard #grid{height:0;min-height:0;margin:0;border:0;box-shadow:none;overflow:hidden}
-  body.tab-overview .cell[data-id="reference"],
+  body.tab-scorecard #grid,
+  body.tab-physics #grid{height:0;min-height:0;margin:0;border:0;box-shadow:none;overflow:hidden}
   body.tab-fugu .cell:not([data-id="fugu"]),
   body.tab-opus .cell:not([data-id="opus"]),
   body.tab-gpt .cell:not([data-id="gpt"]),
   body.tab-gemini .cell:not([data-id="gemini"]),
+  body.tab-fable .cell:not([data-id="fable"]),
   body.tab-reference .cell:not([data-id="reference"]),
-  body.tab-scorecard .cell{
+  body.tab-scorecard .cell,
+  body.tab-physics .cell{
     position:absolute;top:0;left:-9999px;width:1px;height:1px;overflow:hidden;box-shadow:none}
   body.tab-compare .cell:not(.compare-active):not([data-id="reference"]){
     position:absolute;top:0;left:-9999px;width:1px;height:1px;overflow:hidden;box-shadow:none}
-  body.tab-overview .cell iframe{width:200%;height:200%;transform:scale(0.5);transform-origin:0 0}
+  /* WP2: Quick View live panel renders at native cell size (no 200%/scale(0.5)
+     overdraw) — only ONE model iframe is live here now, the rest are posters */
   body.tab-compare .cell iframe{width:100%;height:100%;transform:none}
-
-  /* ---------- cinema / minimize mode ---------- */
-  body.cinema .chip{opacity:0;pointer-events:none;transition:opacity var(--tr)}
-  #cinema-btn.on{color:var(--accent-cyan);border-color:rgba(45,212,191,.38);
-    background:rgba(45,212,191,.09);box-shadow:0 0 14px rgba(45,212,191,.18)}
 
   .focus-overlay{position:absolute;inset:0;z-index:8;cursor:zoom-in;display:none;
     transition:background var(--tr)}
   body.tab-overview .focus-overlay{display:block}
   .focus-overlay:hover{background:rgba(57,255,133,.07)}
+
+  /* ---------- Quick View posters (WP2) — static cards for the non-live panels;
+       the model iframe underneath stays UNMOUNTED (about:blank), so no GL context
+       or rAF loop. Only the leader cell (.live-cell) shows a live panel. ---------- */
+  .cell[data-id="fugu"]{--pc:#39ff85}
+  .cell[data-id="opus"]{--pc:#7b8cff}
+  .cell[data-id="gpt"]{--pc:#ff8c42}
+  .cell[data-id="gemini"]{--pc:#ff4f9a}
+  .cell[data-id="fable"]{--pc:#2dd4bf}
+  .cell[data-id="reference"]{--pc:var(--accent-cyan)}
+  .poster{position:absolute;inset:0;z-index:5;display:none;flex-direction:column;
+    align-items:center;justify-content:center;gap:9px;text-align:center;padding:22px;
+    pointer-events:none;overflow:hidden;
+    background:
+      radial-gradient(90% 70% at 50% 0%, color-mix(in srgb,var(--pc,#7b8cff) 15%,transparent) 0%,transparent 60%),
+      radial-gradient(70% 60% at 50% 118%, color-mix(in srgb,var(--pc,#7b8cff) 10%,transparent) 0%,transparent 55%),
+      rgba(4,6,18,.92)}   /* WP4: opaque card — dropped the redundant blur pass (×4 in Cinema) */
+  .poster::before{content:"";position:absolute;left:50%;top:50%;width:240px;height:240px;
+    transform:translate(-50%,-50%);opacity:.5;pointer-events:none;
+    background:repeating-radial-gradient(circle at 50% 50%,
+      transparent 0 17px, color-mix(in srgb,var(--pc,#7b8cff) 24%,transparent) 17px 18px);
+    -webkit-mask:radial-gradient(circle at 50% 50%,#000 0%,transparent 70%);
+            mask:radial-gradient(circle at 50% 50%,#000 0%,transparent 70%)}
+  .poster>*{position:relative}
+  .poster-tag{font:700 8px var(--font);letter-spacing:.2em;text-transform:uppercase;color:var(--text-faint)}
+  .poster-nm{font:600 20px var(--head);color:var(--text);
+    text-shadow:0 0 22px color-mix(in srgb,var(--pc,#7b8cff) 55%,transparent)}
+  .poster-stat{font:500 11px var(--mono);color:var(--pc,var(--text-dim))}
+  .poster-cta{margin-top:3px;font:600 10px var(--font);letter-spacing:.04em;color:var(--text);
+    padding:6px 13px;border-radius:20px;
+    border:1px solid color-mix(in srgb,var(--pc,#7b8cff) 40%,transparent);
+    background:color-mix(in srgb,var(--pc,#7b8cff) 10%,transparent)}
+  body.tab-overview .cell:not(.live-cell) .poster{display:flex}
+  body.tab-overview .cell:not(.live-cell) .chip{display:none}   /* poster shows the name instead */
+  body.tab-overview .cell.live-cell{box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--accent) 55%,transparent),
+    inset 0 0 90px -14px rgba(57,255,133,.20);z-index:2}
   #scorecard-tab{display:none}
-  body.tab-scorecard #scorecard-tab{display:contents}
+  body.tab-scorecard #scorecard-tab,
+  body.tab-physics #scorecard-tab{display:contents}
+  body.tab-physics #score,
+  body.tab-physics #bars-panel,
+  body.tab-physics #glossary,
+  body.tab-physics .sect-div{display:none}
   #score,#glossary,#physics{display:block}
   .cell{position:relative;background:rgba(3,3,15,.82);overflow:hidden;min-width:0;min-height:0;transition:box-shadow var(--tr)}
   .cell iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
@@ -316,6 +386,8 @@
     background:radial-gradient(circle,rgba(140,230,255,.30) 0,rgba(57,255,133,.10) 40%,transparent 68%);
     animation:splash 2.8s ease-in-out infinite}
   @keyframes splash{0%,100%{transform:scale(.55);opacity:.2}50%{transform:scale(1);opacity:.6}}
+  /* WP4: JS toggles .anim-off when the divider scrolls offscreen / its tab is hidden */
+  .sect-div.anim-off .wv,.sect-div.anim-off .splash{animation-play-state:paused}
   @media (prefers-reduced-motion:reduce){.sect-div .wv,.sect-div .splash{animation:none}.sect-div .splash{opacity:.3}}
 
   /* ---------- themed scrollbar ---------- */
@@ -444,15 +516,14 @@
   /* ---------- footer ---------- */
   #foot{flex:none;z-index:30;display:flex;align-items:center;justify-content:center;gap:7px;
     height:32px;font-size:11px;letter-spacing:.02em;color:var(--text-faint);
-    background:rgba(4,5,18,.72);
-    backdrop-filter:var(--blur-sm);-webkit-backdrop-filter:var(--blur-sm);
+    background:rgba(4,5,18,.82);   /* WP4: dropped blur — footer strip over the static gradient, blur imperceptible */
     border-top:1px solid var(--border);
     box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
   #foot a{color:var(--text-dim);text-decoration:none;font-weight:600;transition:var(--tr)}
   #foot a:hover{color:var(--accent);text-shadow:0 0 10px rgba(57,255,133,.45)}
 
   /* ============================================================
-     MOBILE PORTRAIT — panels stack 4×1, score bar-charts stack 9×1,
+     MOBILE PORTRAIT — panels stack 4×1, score bar-charts stack 1 column,
      toolbar controls collapse into a hamburger drawer
      ============================================================ */
   @media (max-width:680px){
@@ -473,19 +544,20 @@
       max-height:calc(100vh - 110px);overflow:auto;display:none}
     #bar.nav-open #bar-actions{display:flex}
     #bar-actions .vsep{display:none}
-    #bar-actions .lnk,#bar-actions details.menu>summary{width:100%;justify-content:flex-start;
+    #bar-actions .lnk,#bar-actions .tab-btn,#bar-actions details.menu>summary{width:100%;justify-content:flex-start;
       font-size:13px;padding:11px 12px}
     /* Fan / View expand inline (accordion) inside the drawer */
     #bar-actions details.menu{width:100%}
     #bar-actions .pop{position:static;margin-top:4px;min-width:0;width:100%;
       box-shadow:none;background:rgba(255,255,255,.04)}
 
-    /* grid fills viewport height */
+    /* grid fills viewport height — Cinema stacks all 5 model panels 1×5 */
     #grid{height:calc(100svh - 132px)}
+    body.tab-overview #grid{grid-template-columns:1fr;grid-template-rows:repeat(5,1fr)}
     #score-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
     #score th,#score td{white-space:nowrap}
 
-    /* scorecard — tighter chrome, nine bar-charts stacked 9×1 */
+    /* scorecard — tighter chrome, bar-charts stacked 1 column */
     .sect-div{margin:10px 12px}
     #score,#glossary,#physics{padding:20px 14px 24px;margin:0}
     #score h3,#glossary h3,#physics h3{font-size:19px}
@@ -498,12 +570,24 @@
     #diffbox{padding:18px 16px 16px;max-width:94vw}
     #diffcanvas{width:100%;max-width:100%;height:auto}
     /* compact always-visible sections on mobile */
-    #hero-score{margin:6px 8px 0;padding:8px 12px;gap:10px}
-    #hero-bars{gap:12px}
+    #hero-score{margin:6px 8px 0;padding:8px 10px;gap:8px}
+    #winner-badge{grid-template-columns:1fr;gap:4px;padding:11px 12px}
+    #winner-badge .wb-tag{font-size:8px}
+    #winner-badge .wb-name{font-size:24px;line-height:1.05;overflow-wrap:anywhere}
+    #winner-badge .wb-score{justify-self:start;font-size:8px}
+    #hero-card-row{gap:8px}
+    #hero-title{display:none}
+    #hero-bars{display:flex;grid-template-columns:none;gap:8px;overflow-x:auto;
+      -webkit-overflow-scrolling:touch;
+      scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent}
+    #hero-bars::-webkit-scrollbar{height:4px}
+    #hero-bars::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px}
+    #hero-bars::-webkit-scrollbar-track{background:transparent}
+    .kpi{flex:0 0 158px}
     #compare-header{margin:4px 8px 0;flex-wrap:wrap;gap:6px}
     #compare-info{display:none}
-    #grid{margin:4px 8px 0;height:calc(100svh - 220px)}
-    body.tab-compare #grid{height:calc(100svh - 262px)}
+    #grid{margin:4px 8px 0;height:calc(100svh - 222px)}
+    body.tab-compare #grid{height:calc(100svh - 264px)}
   }
 
   /* ---------- simulation control sidebar ---------- */
@@ -603,11 +687,10 @@
   <button class="lnk" id="hamburger" aria-label="Toggle menu" aria-controls="bar-actions" aria-expanded="false"><span class="ham-ico"></span></button>
   <div id="bar-actions">
     <button id="ctrl-toggle" onclick="document.body.classList.toggle('ctrl-open')" aria-label="Toggle controls">⊟ Controls</button>
-    <button class="lnk" id="cinema-btn" title="Hide all panels — show only rays">⊙ Cinema</button>
-    <span class="vsep"></span>
-    <button class="lnk" id="diffbtn">⊞ Diff overlay</button>
-    <button class="lnk" id="scorebtn">★ Scorecard</button>
-    <button class="lnk" id="physicsbtn">∂ Physics</button>
+    <button class="tab-btn act" id="cinema-btn" data-tab="overview">⊙ Cinema</button>
+    <button class="tab-btn" data-tab="compare">⊞ Compare</button>
+    <button class="tab-btn" data-tab="scorecard">★ Scorecard</button>
+    <button class="tab-btn" data-tab="physics">∂ Physics</button>
   </div>
   <span id="readout">Hover a panel for c(z) · D(x,y)</span>
 </div>
@@ -656,18 +739,15 @@
 </div>
 
 <div id="main">
-<nav id="tabs-bar">
-  <button class="tab-btn act" data-tab="overview">Gallery</button>
-  <button class="tab-btn" data-tab="compare">Compare</button>
-  <button class="tab-btn" data-tab="scorecard">Scorecard</button>
-</nav>
-
 <section id="hero-score">
-  <span id="hero-title">Benchmark</span>
-  <div id="hero-bars"></div>
   <div id="winner-badge">
-    <span class="wb-tag">★ leader</span>
+    <span class="wb-tag" title="Weighted physics winner: 55% core TL error, 25% shadow-mask error, 15% receiver TL error, 5% consistency. Close ties go to |Δy| closest to BELLHOP3D.">★ leader</span>
     <span class="wb-name" id="winner-name">—</span>
+    <span class="wb-score" id="winner-score">awaiting canonical metrics</span>
+  </div>
+  <div id="hero-card-row">
+    <span id="hero-title">Benchmark</span>
+    <div id="hero-bars"></div>
   </div>
 </section>
 
@@ -678,6 +758,7 @@
     <option value="opus">Opus 4.8 (max)</option>
     <option value="gpt">GPT 5.5 (XH)</option>
     <option value="gemini">Gemini 3.1 Pro</option>
+    <option value="fable">Fable 5 (Max)</option>
   </select>
   <button id="delta-btn">⊞ Δ TL Overlay</button>
   <span id="compare-info">vs BELLHOP3D reference</span>
@@ -687,36 +768,50 @@
   <div class="cell" data-id="fugu">
     <div class="focus-overlay" data-focus="fugu"></div>
     <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"/><path d="M18 12v.5"/><path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"/><path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"/><path d="M10.46 7.26C10.2 5.88 9.17 4.24 8 3h5.8a2 2 0 0 1 1.98 1.67l.23 1.4"/><path d="m16.01 17.93-.23 1.4A2 2 0 0 1 13.8 21H9.5a5.96 5.96 0 0 0 1.49-3.98"/></svg><span class="nm">Sakana Fugu</span><span class="tag">ultra · model</span></div>
-    <iframe data-id="fugu" src="../models/fugu/ray_view.html" title="Sakana Fugu"></iframe>
-    <div class="wait"><div class="ring"></div>Awaiting Fugu panel…</div></div>
+    <iframe data-id="fugu" data-src="../models/fugu/ray_view.html" title="Sakana Fugu"></iframe>
+    <div class="wait"><div class="ring"></div>Awaiting Fugu panel…</div>
+    <div class="poster"><span class="poster-tag">model preview</span><span class="poster-nm">Sakana Fugu</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
   <div class="cell" data-id="opus">
     <div class="focus-overlay" data-focus="opus"></div>
     <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(350 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(20 12 12)"/><rect x="10.5" y="1" width="3.0" height="6.5" rx="0.5" transform="rotate(50 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(75 12 12)"/><rect x="11.3" y="1" width="1.4" height="6.5" rx="0.5" transform="rotate(100 12 12)"/><rect x="10.5" y="1" width="3.0" height="6.5" rx="0.5" transform="rotate(128 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(152 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(175 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(200 12 12)"/><rect x="11.3" y="1" width="1.4" height="6.5" rx="0.5" transform="rotate(225 12 12)"/><rect x="10.5" y="1" width="3.0" height="6.5" rx="0.5" transform="rotate(255 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(282 12 12)"/><rect x="10.5" y="1" width="3.0" height="6.5" rx="0.5" transform="rotate(316 12 12)"/></svg><span class="nm">Opus 4.8</span><span class="tag">max · model</span></div>
-    <iframe data-id="opus" src="../models/opus/ray_view.html" title="Opus 4.8"></iframe>
-    <div class="wait"><div class="ring"></div>Awaiting Opus panel…</div></div>
+    <iframe data-id="opus" data-src="../models/opus/ray_view.html" title="Opus 4.8"></iframe>
+    <div class="wait"><div class="ring"></div>Awaiting Opus panel…</div>
+    <div class="poster"><span class="poster-tag">model preview</span><span class="poster-nm">Opus 4.8</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
   <div class="cell" data-id="gpt">
     <div class="focus-overlay" data-focus="gpt"></div>
     <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg><span class="nm">GPT 5.5</span><span class="tag">extra high · model</span></div>
-    <iframe data-id="gpt" src="../models/gpt/ray_view.html" title="GPT 5.5"></iframe>
-    <div class="wait"><div class="ring"></div>Awaiting GPT panel…</div></div>
+    <iframe data-id="gpt" data-src="../models/gpt/ray_view.html" title="GPT 5.5"></iframe>
+    <div class="wait"><div class="ring"></div>Awaiting GPT panel…</div>
+    <div class="poster"><span class="poster-tag">model preview</span><span class="poster-nm">GPT 5.5</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
   <div class="cell" data-id="gemini">
     <div class="focus-overlay" data-focus="gemini"></div>
     <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C12 2 13.5 8.75 17.5 12C13.5 15.25 12 22 12 22C12 22 10.5 15.25 6.5 12C10.5 8.75 12 2 12 2Z"/><path d="M2 12C2 12 8.75 10.5 12 6.5C15.25 10.5 22 12 22 12C22 12 15.25 13.5 12 17.5C8.75 13.5 2 12 2 12Z"/></svg><span class="nm">Gemini 3.1 Pro</span><span class="tag">high · model</span></div>
-    <iframe data-id="gemini" src="../models/gemini/ray_view.html" title="Gemini 3.1 Pro"></iframe>
-    <div class="wait"><div class="ring"></div>Awaiting Gemini panel…</div></div>
+    <iframe data-id="gemini" data-src="../models/gemini/ray_view.html" title="Gemini 3.1 Pro"></iframe>
+    <div class="wait"><div class="ring"></div>Awaiting Gemini panel…</div>
+    <div class="poster"><span class="poster-tag">model preview</span><span class="poster-nm">Gemini 3.1 Pro</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
+  <div class="cell" data-id="fable">
+    <div class="focus-overlay" data-focus="fable"></div>
+    <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2Z"/><path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7Z"/></svg><span class="nm">Fable 5 (Max)</span><span class="tag">model</span></div>
+    <iframe data-id="fable" data-src="../models/fable/ray_view.html" title="Fable 5 (Max)"></iframe>
+    <div class="wait"><div class="ring"></div>Awaiting Fable panel…</div>
+    <div class="poster"><span class="poster-tag">model preview</span><span class="poster-nm">Fable 5 (Max)</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
   <div class="cell" data-id="reference">
+    <div class="focus-overlay" data-focus="reference"></div>
     <div class="chip ref"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="1.5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M8.5 15.5a5 5 0 0 1 0-7"/><path d="M18.5 5.5a10 10 0 0 1 0 13"/><path d="M5.5 18.5a10 10 0 0 1 0-13"/></svg><span class="nm">BELLHOP3D</span><span class="tag">reference · ground truth</span></div>
-    <iframe data-id="reference" src="../reference/ray_view_reference.html" title="BELLHOP3D reference"></iframe>
-    <div class="wait"><div class="ring"></div>Loading reference…</div></div>
+    <iframe data-id="reference" data-src="../reference/ray_view_reference.html" title="BELLHOP3D reference"></iframe>
+    <div class="wait"><div class="ring"></div>Loading reference…</div>
+    <div class="poster"><span class="poster-tag">reference preview</span><span class="poster-nm">BELLHOP3D</span><span class="poster-stat">ground truth · 3D ray trace</span><span class="poster-cta">▶ View standalone</span></div></div>
 </div>
 
 <div id="scorecard-tab">
 <div id="score">
   <div class="hd"><h3>Score<em>card</em></h3></div>
   <div id="score-table-wrap"><table id="scoretbl"></table></div>
-  <p class="note">Raw, unweighted TL RMSE + TL(R) error. The tiered scoring rubric is intentionally
-    deferred — calibrated against real numbers later. <b style="color:var(--text-dim)">core RMSE</b>
-    excludes cells in shadow (TL ≥ 120 dB) in either field; the leader is the lowest core RMSE.</p>
+  <p class="note"><b style="color:var(--text-dim)">Leader</b> is a weighted physics score:
+    55% core TL error, 25% shadow-mask error, 15% receiver TL error, and 5% reciprocity/convergence
+    consistency. <b style="color:var(--text-dim)">Core RMSE</b> is measured over BELLHOP-insonified
+    cells with TL clamped at the 120 dB shadow cutoff. Scores within 2 points are broken by whose
+    out-of-plane |Δy| is closest to BELLHOP3D; FPS is reported but does not affect the leader.</p>
 </div>
 
 <div id="bars-panel">
@@ -744,6 +839,21 @@
 
     <div class="mc g">
       <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 14.7 8.5 21 9.4 16.5 13.8 17.6 20 12 17.1 6.4 20 7.5 13.8 3 9.4 9.3 8.5 12 3Z"/></svg></span>
+        <span class="mc-t"><b>Leader score</b><span>weighted physics · points</span></span>
+        <span class="mc-badge">leader</span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mrow><mi>S</mi><mo>=</mo><mn>100</mn><mo>(</mo><mn>0.55</mn><msub><mi>E</mi><mtext>TL</mtext></msub><mo>+</mo>
+        <mn>0.25</mn><msub><mi>E</mi><mtext>mask</mtext></msub><mo>+</mo>
+        <mn>0.15</mn><msub><mi>E</mi><mi>R</mi></msub><mo>+</mo>
+        <mn>0.05</mn><msub><mi>E</mi><mtext>cons</mtext></msub><mo>)</mo></mrow>
+      </math></div>
+      <p class="mc-desc">Lower wins. Core TL error is normalized by 25 dB; mask error averages false-shadow and false-light rates; receiver TL error is capped at 25 dB; consistency blends reciprocity and convergence caps. Close ties go to the model whose out-of-plane |Δy| is nearest BELLHOP3D.</p>
+    </div>
+
+    <div class="mc g">
+      <div class="mc-hd">
         <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 4H7l6 8-6 8h10"/></svg></span>
         <span class="mc-t"><b>TL RMSE</b><span>full-field error · dB</span></span>
       </div>
@@ -766,7 +876,7 @@
         <munder><mo>∑</mo><mrow><mi>i</mi><mo>∈</mo><mi>C</mi></mrow></munder>
         <msup><mrow><mo>(</mo><msub><mover><mi>T</mi><mo>^</mo></mover><mi>i</mi></msub><mo>−</mo><msub><mi>T</mi><mi>i</mi></msub><mo>)</mo></mrow><mn>2</mn></msup></mrow></msqrt>
       </math></div>
-      <p class="mc-desc">The same RMSE but only over cells insonified in both fields — <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>C</mi><mo>=</mo><mo>{</mo><mi>i</mi><mo>:</mo><msub><mover><mi>T</mi><mo>^</mo></mover><mi>i</mi></msub><mo>,</mo><msub><mi>T</mi><mi>i</mi></msub><mo>&lt;</mo><mn>120</mn><mo>}</mo></math> dB — so empty shadow zones can't flatter the score. This is the leaderboard metric; lowest wins.</p>
+      <p class="mc-desc">RMSE over cells BELLHOP3D marks as insonified — <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>C</mi><mo>=</mo><mo>{</mo><mi>i</mi><mo>:</mo><msub><mi>T</mi><mi>i</mi></msub><mo>&lt;</mo><mn>120</mn><mo>}</mo></math> dB — with model TL clamped at 120 dB. This is the dominant 55% term in the leader score.</p>
     </div>
 
     <div class="mc b">
@@ -831,7 +941,7 @@
           <mrow><mo>|</mo><mo>{</mo><mi>i</mi><mo>:</mo><msub><mi>TL</mi><mi>i</mi></msub><mo>&lt;</mo><mn>120</mn><mo>}</mo><mo>|</mo></mrow>
           <mi>N</mi></mfrac><mo>×</mo><mn>100</mn></mrow>
       </math></div>
-      <p class="mc-desc">Share of grid cells the model marks as insonified (TL below the 120 dB shadow cutoff) — how much of the volume the field reaches versus shadow.</p>
+      <p class="mc-desc">Share of grid cells the model marks as insonified (TL below the 120 dB shadow cutoff). The leader score uses the full mask disagreement too: false shadow over BELLHOP-lit cells and false light over BELLHOP-shadow cells.</p>
     </div>
 
     <div class="mc p">
@@ -844,7 +954,7 @@
         <munder><mi>max</mi><mtext>ray</mtext></munder>
         <mo>|</mo><msub><mi>y</mi><mtext>ray</mtext></msub><mo>−</mo><msub><mi>y</mi><mn>0</mn></msub><mo>|</mo></mrow>
       </math></div>
-      <p class="mc-desc">Peak lateral excursion a ray makes out of its launch vertical plane — a genuinely 3D effect from horizontal refraction and bathymetry. A bonus/tiebreaker axis, not core score.</p>
+      <p class="mc-desc">Peak lateral excursion a ray makes out of its launch vertical plane — a genuinely 3D effect from bathymetry. It does not dominate the score; within a 2-point leader tie, the model closest to BELLHOP3D's |Δy| wins.</p>
     </div>
 
     <div class="mc d">
@@ -1021,6 +1131,14 @@
   <a href="https://huguryildiz.com/" target="_blank" rel="noopener">Hüseyin Uğur Yıldız</a></footer>
 
 </div><!-- /main -->
-<script src="harness.js?v=8"></script>
+<script>
+  /* WP0 dev-only perf overlay — opt-in via ?perf=1 (absolute path: survives the / → /harness/ rewrite) */
+  if(new URLSearchParams(location.search).has('perf')){
+    var _ps=document.createElement('script');_ps.src='/harness/perf.js?v=1';document.head.appendChild(_ps);
+  }
+</script>
+<!-- absolute path so it loads under the vercel rewrite (/ → /harness/index.html); a relative src resolves to /harness.js → 404 -->
+<script src="/harness/scoring.js?v=1"></script>
+<script src="/harness/harness.js?v=10"></script>
 </body>
 </html>

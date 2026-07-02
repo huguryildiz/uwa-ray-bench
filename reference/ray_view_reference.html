@@ -317,19 +317,22 @@ function tlColor(tl){ // 45..115 dB -> warm(loud)->cool/dark(quiet)
   const r=Math.min(1,Math.max(0,1.4*t-0.2)), g=Math.sin(Math.PI*t),
         b=Math.min(1,Math.max(0,1.2-1.6*t));return[r*.9+.1,g*.85,b*.95];}
 
-function buildStop(buffer){
+// Pure decode: bytes -> transferable TypedArrays. No DOM/GL, so it runs identically on
+// the main thread (fallback) and inside the Blob worker (built from this function's source).
+// TL field is a verbatim byte slice, so it is bit-identical regardless of where it decodes.
+function decodeStop(buffer){
   const dv=new DataView(buffer);
   if(String.fromCharCode(dv.getUint8(0),dv.getUint8(1),dv.getUint8(2),dv.getUint8(3))!=='URB1')
     throw 'bad magic';
   let off=4; const hdrLen=dv.getUint32(off,true); off+=4;
   const hdr=JSON.parse(new TextDecoder().decode(new Uint8Array(buffer,off,hdrLen)));
-  off+=hdrLen; curHdr=hdr;
+  off+=hdrLen;
   const g=hdr.grid, nTL=g.nx*g.ny*g.nz;
-  tlField=new Float32Array(buffer.slice(off,off+nTL*4)); off+=nTL*4;
+  const tlField=new Float32Array(buffer.slice(off,off+nTL*4)); off+=nTL*4;
   const q=hdr.quant_box_m, deq=(v,lo,hi)=>lo+((v+32767)/65534)*(hi-lo);
 
   // ---- rays -> line segments ----
-  const nr=hdr.n_rays; const pos=[],col=[],tim=[],xzSegs=[];
+  const nr=hdr.n_rays; const pos=[],col=[],tim=[],xzSegs=[]; let tMax=1;
   for(let r=0;r<nr;r++){
     const npts=dv.getInt32(off,true);off+=4;
     const xs=new Array(npts),ys=new Array(npts),zs=new Array(npts);
@@ -348,9 +351,6 @@ function buildStop(buffer){
       xzSegs.push(xw[p],zw[p],xw[p+1],zw[p+1],ts[p],ts[p+1],c[0],c[1],c[2]);}
     if(ts[npts-1]>tMax)tMax=ts[npts-1];
   }
-  rayGeo={pos:buf(new Float32Array(pos)),col:buf(new Float32Array(col)),
-    tim:buf(new Float32Array(tim)),n:tim.length};
-  rayXZ=new Float32Array(xzSegs);
 
   // ---- insonified TL volume (point-splat, TL<120) ----
   const vp=[],vc=[]; let ins=0;
@@ -360,8 +360,43 @@ function buildStop(buffer){
       const xk=ix/(g.nx-1)*X_MAX, yk=iy/(g.ny-1)*Y_MAX, zm=iz/(g.nz-1)*Z_MAX;
       const sc=toScene(xk,yk,zm); vp.push(sc[0],sc[1],sc[2]);
       const c=tlColor(tl); vc.push(c[0],c[1],c[2]);}}
-  volGeo={pos:buf(new Float32Array(vp)),col:buf(new Float32Array(vc)),n:vp.length/3};
-  return {nr, insFrac:ins/nTL};
+
+  return {rayPos:new Float32Array(pos), rayCol:new Float32Array(col),
+    rayTim:new Float32Array(tim), rayN:tim.length, rayXZ:new Float32Array(xzSegs),
+    volPos:new Float32Array(vp), volCol:new Float32Array(vc), volN:vp.length/3,
+    tlField, tMax, nr, insFrac:ins/nTL, hdr};
+}
+
+// WP3: decode .bin off the main thread in a Blob worker (no new file, no build step),
+// transferring result buffers back. Falls back to synchronous decode if Worker is unavailable.
+let decodeWorker=null, decodeSeq=0; const decodePending=new Map();
+try{
+  const src="'use strict';\n"+
+    `const X_MAX=${X_MAX},Y_MAX=${Y_MAX},Z_MAX=${Z_MAX},VEXAG=${VEXAG},S=${S},TL_SHADOW=${TL_SHADOW};\n`+
+    toScene.toString()+"\n"+hueRGB.toString()+"\n"+tlColor.toString()+"\n"+decodeStop.toString()+"\n"+
+    "onmessage=function(e){var id=e.data.id,buffer=e.data.buffer,r;"+
+    "try{r=decodeStop(buffer);}catch(err){postMessage({id:id,error:String(err)});return;}"+
+    "postMessage({id:id,rayPos:r.rayPos,rayCol:r.rayCol,rayTim:r.rayTim,rayN:r.rayN,rayXZ:r.rayXZ,"+
+    "volPos:r.volPos,volCol:r.volCol,volN:r.volN,tlField:r.tlField,tMax:r.tMax,nr:r.nr,insFrac:r.insFrac,hdr:r.hdr},"+
+    "[r.rayPos.buffer,r.rayCol.buffer,r.rayTim.buffer,r.rayXZ.buffer,r.volPos.buffer,r.volCol.buffer,r.tlField.buffer]);};";
+  decodeWorker=new Worker(URL.createObjectURL(new Blob([src],{type:'text/javascript'})));
+  decodeWorker.onmessage=e=>{const d=e.data,p=decodePending.get(d.id);
+    if(!p)return; decodePending.delete(d.id); d.error?p.rej(d.error):p.res(d);};
+  decodeWorker.onerror=()=>{decodeWorker=null;};  // disable on worker failure; future loads fall back
+}catch(_){ decodeWorker=null; }
+function runDecode(buffer){
+  if(!decodeWorker){ try{ return Promise.resolve(decodeStop(buffer)); }catch(e){ return Promise.reject(e); } }
+  return new Promise((res,rej)=>{ const id=++decodeSeq; decodePending.set(id,{res,rej});
+    decodeWorker.postMessage({id,buffer},[buffer]); });
+}
+async function buildStopAsync(buffer){
+  const r=await runDecode(buffer);
+  curHdr=r.hdr; tlField=r.tlField; tMax=r.tMax;
+  rayGeo={pos:buf(r.rayPos),col:buf(r.rayCol),tim:buf(r.rayTim),n:r.rayN};
+  volGeo={pos:buf(r.volPos),col:buf(r.volCol),n:r.volN};
+  rayXZ=r.rayXZ;
+  buildXSectCache();          // WP3: rebuild the x-section clip cache for the new stop
+  return {nr:r.nr, insFrac:r.insFrac};
 }
 
 /* ========================= camera ========================= */
@@ -381,12 +416,22 @@ function project(sx,sy,sz){const x=mvp[0]*sx+mvp[4]*sy+mvp[8]*sz+mvp[12],
 /* ========================= draw ========================= */
 let playing=false, curTime=0, lastT=0, fps=60, fpsAcc=0, fpsN=0;
 let showVol=true, volOp=0.5, speed=1;
+// WP3: render-loop gating — only schedule frames when visible, on-screen, and there
+// is something to draw (playing ∨ camera/stop/volume change ∨ resize). Idle => 0 rAF.
+let dirty=true, overlayDirty=true, rafPending=false;
+let visible=(typeof document==='undefined')||document.visibilityState!=='hidden', onScreen=true;
+function schedule(){ if(rafPending||!visible||!onScreen) return;
+  rafPending=true; requestAnimationFrame(frame); }
+function markDirty(){ dirty=true; schedule(); }
 function frame(now){
-  const dt=(now-lastT)/1000||0; lastT=now;
+  rafPending=false;
+  let dt=(now-lastT)/1000; lastT=now;
+  if(!(dt>0)) dt=0; else if(dt>0.05) dt=0.05;   // clamp resume gaps; steady frames unaffected
   if(playing){curTime+=dt*speed*tMax/14; if(curTime>tMax*1.25)curTime=tMax*1.25;
-    document.getElementById('scrub').value=Math.min(1,curTime/(tMax*1.25));}
+    document.getElementById('scrub').value=Math.min(1,curTime/(tMax*1.25)); dirty=true;}
   if(dt>0){fpsAcc+=1/dt;fpsN++; if(fpsN>=30){fps=fpsAcc/fpsN;fpsAcc=0;fpsN=0;refreshCard();}}
-  render(); requestAnimationFrame(frame);
+  if(dirty){ render(); dirty=false; }
+  if(playing) schedule();   // keep looping only while animating
 }
 function render(){
   resize(); updateMVP();
@@ -430,7 +475,7 @@ function render(){
   bindA(pFlat,'a_pos',markBuf,3,6,0);bindA(pFlat,'a_col',markBuf,3,6,3);
   gl.drawArrays(gl.POINTS,0,2);
   gl.disable(gl.BLEND);
-  drawOverlay();
+  if(overlayDirty){ drawOverlay(); overlayDirty=false; }  // WP3: labels/legend are camera/size-only
   drawXSection();
 }
 function u(p,n){return gl.getUniformLocation(p,n);}
@@ -466,7 +511,9 @@ function drawOverlay(){
   const lg=[['#ffd36b','source S'],['#9fe8ff','receiver R'],
     ['#b08c5a','seabed / seamounts'],['#6cf','rays (by launch angle)'],
     ['#2aa0d0','insonified TL volume']];
-  let ly=H-214; octx.fillStyle='rgba(8,14,26,.6)';octx.fillRect(8,ly-14,156,18*lg.length+8);
+  const legendH=18*lg.length+8;
+  let ly=Math.max(26,H-226-legendH+14);
+  octx.fillStyle='rgba(8,14,26,.6)';octx.fillRect(8,ly-14,156,legendH);
   for(const[c,t]of lg){octx.fillStyle=c;octx.fillRect(14,ly-9,10,10);
     octx.fillStyle='#cfe3ff';octx.fillText(t,30,ly);ly+=18;}
   // TL colorbar
@@ -481,11 +528,42 @@ function drawOverlay(){
 }
 
 /* ========================= centerline cross-section inset ========================= */
+// clip segment against bathy(x,12) floor; binary-search for intersection (time-independent)
+function clipSeg(x1,z1,x2,z2){
+  const b1=bathy(x1,12),b2=bathy(x2,12);
+  const u1=z1>=b1,u2=z2>=b2;
+  if(u1&&u2) return null;
+  if(!u1&&!u2) return [x1,z1,x2,z2];
+  let ta=0,tb=1;
+  for(let k=0;k<10;k++){const tm=(ta+tb)/2,xm=x1+tm*(x2-x1),zm=z1+tm*(z2-z1);
+    if(zm>=bathy(xm,12)) tb=tm; else ta=tm;}
+  const tc=(ta+tb)/2,xc=x1+tc*(x2-x1),zc=z1+tc*(z2-z1);
+  return u1?[xc,zc,x2,z2]:[x1,z1,xc,zc];
+}
+// WP3: cache the clipped polyline once per stop (clip is time-independent); only the
+// t1<=curTime visibility test is dynamic, so drawXSection skips entirely when curTime is unchanged.
+let xsectSegs=null, xsectLastTime=-1, xsectDirty=true;
+function buildXSectCache(){
+  xsectSegs=[];
+  if(rayXZ){
+    const n=rayXZ.length/9;
+    for(let i=0;i<n;i++){const o=i*9;
+      const seg=clipSeg(rayXZ[o],rayXZ[o+1],rayXZ[o+2],rayXZ[o+3]);
+      if(!seg) continue;
+      xsectSegs.push({x1:seg[0],z1:seg[1],x2:seg[2],z2:seg[3],
+        t1:rayXZ[o+4],t2:rayXZ[o+5],
+        r:rayXZ[o+6]*255|0,g:rayXZ[o+7]*255|0,b:rayXZ[o+8]*255|0});}
+  }
+  xsectDirty=true;
+}
 function drawXSection(){
+  if(!xsectDirty && curTime===xsectLastTime) return;   // WP3: nothing changed since last draw
+  xsectLastTime=curTime; xsectDirty=false;
   const xc=document.getElementById('xsect');
   const ctx=xc.getContext('2d');
   const W=xc.width, H=xc.height;
-  const PAD={l:34,r:6,t:20,b:22};
+  // Reserve a title band so the near-surface S marker cannot collide with the heading.
+  const PAD={l:34,r:6,t:34,b:22};
   const pw=W-PAD.l-PAD.r, ph=H-PAD.t-PAD.b;
   ctx.clearRect(0,0,W,H);
   // title
@@ -504,30 +582,15 @@ function drawXSection(){
   ctx.lineTo(cx(X_MAX),cz(Z_MAX)); ctx.lineTo(cx(0),cz(Z_MAX)); ctx.closePath();
   ctx.fillStyle='rgba(160,120,70,.40)'; ctx.fill();
   ctx.strokeStyle='rgba(210,170,100,.55)'; ctx.lineWidth=0.8; ctx.stroke();
-  // clip segment against bathy(x,12) floor; binary-search for intersection
-  function clipSeg(x1,z1,x2,z2){
-    const b1=bathy(x1,12),b2=bathy(x2,12);
-    const u1=z1>=b1,u2=z2>=b2;
-    if(u1&&u2) return null;
-    if(!u1&&!u2) return [x1,z1,x2,z2];
-    let ta=0,tb=1;
-    for(let k=0;k<10;k++){const tm=(ta+tb)/2,xm=x1+tm*(x2-x1),zm=z1+tm*(z2-z1);
-      if(zm>=bathy(xm,12)) tb=tm; else ta=tm;}
-    const tc=(ta+tb)/2,xc=x1+tc*(x2-x1),zc=z1+tc*(z2-z1);
-    return u1?[xc,zc,x2,z2]:[x1,z1,xc,zc];
-  }
-  // ray segments (animated: show segments whose t1 <= curTime)
-  if(rayXZ){
-    const n=rayXZ.length/9;
-    for(let i=0;i<n;i++){
-      const o=i*9;
-      if(rayXZ[o+4]>curTime) continue;
-      const seg=clipSeg(rayXZ[o],rayXZ[o+1],rayXZ[o+2],rayXZ[o+3]);
-      if(!seg) continue;
-      const alpha=rayXZ[o+5]<=curTime?0.45:0.75;
-      ctx.strokeStyle=`rgba(${rayXZ[o+6]*255|0},${rayXZ[o+7]*255|0},${rayXZ[o+8]*255|0},${alpha})`;
+  // ray segments (animated: show cached clipped segments whose t1 <= curTime)
+  if(xsectSegs){
+    for(let i=0;i<xsectSegs.length;i++){
+      const s=xsectSegs[i];
+      if(s.t1>curTime) continue;
+      const alpha=s.t2<=curTime?0.45:0.75;
+      ctx.strokeStyle=`rgba(${s.r},${s.g},${s.b},${alpha})`;
       ctx.lineWidth=0.65;
-      ctx.beginPath(); ctx.moveTo(cx(seg[0]),cz(seg[1])); ctx.lineTo(cx(seg[2]),cz(seg[3])); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx(s.x1),cz(s.z1)); ctx.lineTo(cx(s.x2),cz(s.z2)); ctx.stroke();
     }
   }
   // axes
@@ -558,7 +621,7 @@ let dpr=1;
 function resize(){dpr=Math.min(2,window.devicePixelRatio||1);
   const w=glc.clientWidth,h=glc.clientHeight;
   const W=w*dpr|0,H=h*dpr|0;
-  if(glc.width!==W||glc.height!==H){glc.width=W;glc.height=H;ov.width=W;ov.height=H;}}
+  if(glc.width!==W||glc.height!==H){glc.width=W;glc.height=H;ov.width=W;ov.height=H;overlayDirty=true;}}
 
 /* ========================= metric card + postMessage ========================= */
 let stopSummary=null, manifest=null, curStop={elev:41,azim:31};
@@ -592,7 +655,7 @@ function postMetrics(){
     n_rays:stopSummary.n_rays, freq:manifest.freq_hz,
     reciprocity:0, conv_ins:0, conv_tlR:0, out_of_plane:null,
     fps:Math.round(fps), is_reference:true,
-    tl:Array.from(tlField)}, '*');
+    tl:tlField}, '*');   /* WP1: send the Float32Array directly (structured clone) — no Array.from boxing */
 }
 
 /* ========================= data loading ========================= */
@@ -607,10 +670,11 @@ async function loadStop(elev,azim){
   document.getElementById('elevsel').value=elev; document.getElementById('azimsel').value=azim;
   stopSummary=manifest.stops.find(s=>s.stop===`${elev}x${azim}`);
   const ab=await (await fetch(`data/${elev}x${azim}.bin`)).arrayBuffer();
-  tMax=1; buildStop(ab);
+  await buildStopAsync(ab);   // WP3: decode off the main thread, transfer buffers back
   curTime=0; document.getElementById('scrub').value=0;
   document.getElementById('loading').style.display='none';
   refreshCard(); postMetrics();
+  overlayDirty=true; markDirty();   // WP3: new geometry -> render once
 }
 
 /* ========================= interaction ========================= */
@@ -637,35 +701,39 @@ addEventListener('pointermove',e=>{
     else parent.postMessage({type:'cursor',panel:'reference',clear:true},'*');return;}
   cam.yaw-=(e.clientX-lx)*0.008; cam.pitch+=(e.clientY-ly)*0.008;
   cam.pitch=Math.max(-1.45,Math.min(1.45,cam.pitch)); lx=e.clientX;ly=e.clientY;
-  parent.postMessage({type:'camera',pose:cam},'*');});
+  parent.postMessage({type:'camera',pose:cam},'*'); overlayDirty=true; markDirty();});
 glc.addEventListener('wheel',e=>{e.preventDefault();
   cam.dist=Math.max(1.2,Math.min(9,cam.dist*(1+Math.sign(e.deltaY)*0.08)));
-  parent.postMessage({type:'camera',pose:cam},'*');},{passive:false});
+  parent.postMessage({type:'camera',pose:cam},'*'); overlayDirty=true; markDirty();},{passive:false});
 document.getElementById('play').onclick=()=>{playing=!playing;
-  document.getElementById('play').textContent=playing?'❚❚ Pause':'▶ Play';};
+  document.getElementById('play').textContent=playing?'❚❚ Pause':'▶ Play'; markDirty();};
 document.getElementById('reset').onclick=()=>{playing=false;curTime=0;
-  document.getElementById('play').textContent='▶ Play';document.getElementById('scrub').value=0;};
-document.getElementById('camreset').onclick=camDefault;
+  document.getElementById('play').textContent='▶ Play';document.getElementById('scrub').value=0; markDirty();};
+document.getElementById('camreset').onclick=()=>{camDefault(); overlayDirty=true; markDirty();};
 document.getElementById('elevsel').onchange=e=>loadStop(e.target.value,curStop.azim);
 document.getElementById('azimsel').onchange=e=>loadStop(curStop.elev,e.target.value);
 document.getElementById('speed').oninput=e=>speed=+e.target.value;
 document.getElementById('scrub').oninput=e=>{playing=false;
-  document.getElementById('play').textContent='▶ Play';curTime=+e.target.value*tMax*1.25;};
-document.getElementById('volchk').onchange=e=>showVol=e.target.checked;
-document.getElementById('opac').oninput=e=>volOp=+e.target.value;
+  document.getElementById('play').textContent='▶ Play';curTime=+e.target.value*tMax*1.25; markDirty();};
+document.getElementById('volchk').onchange=e=>{showVol=e.target.checked; overlayDirty=true; markDirty();};
+document.getElementById('opac').oninput=e=>{volOp=+e.target.value; markDirty();};
 function toggleDrawer(){document.getElementById('drawer').classList.toggle('open');}
 document.getElementById('drawer-tab').onclick=toggleDrawer;
 document.getElementById('drawer-close').onclick=toggleDrawer;
 
 /* ========================= parent messages ========================= */
 addEventListener('message',e=>{const m=e.data||{};switch(m.type){
-  case'set_camera': if(m.pose){cam.yaw=m.pose.yaw;cam.pitch=m.pose.pitch;cam.dist=m.pose.dist;}break;
+  case'set_camera': if(m.pose){cam.yaw=m.pose.yaw;cam.pitch=m.pose.pitch;cam.dist=m.pose.dist;} overlayDirty=true;markDirty();break;
   case'set_stop': loadStop(m.elev,m.azim);break;
-  case'play': playing=true;document.getElementById('play').textContent='❚❚ Pause';break;
-  case'pause': playing=false;document.getElementById('play').textContent='▶ Play';break;
-  case'reset': playing=false;curTime=0;document.getElementById('play').textContent='▶ Play';break;
-  case'set_volume': showVol=!!m.on;document.getElementById('volchk').checked=showVol;break;
-  case'set_opacity': volOp=+m.v;document.getElementById('opac').value=volOp;break;
+  case'play': playing=true;document.getElementById('play').textContent='❚❚ Pause';markDirty();break;
+  case'pause': playing=false;document.getElementById('play').textContent='▶ Play';markDirty();break;
+  case'reset': playing=false;curTime=0;document.getElementById('play').textContent='▶ Play';markDirty();break;
+  case'set_volume': showVol=!!m.on;document.getElementById('volchk').checked=showVol;overlayDirty=true;markDirty();break;
+  case'set_opacity': volOp=+m.v;document.getElementById('opac').value=volOp;markDirty();break;
+  case'set_speed': speed=Math.max(0.25,Math.min(4,+m.speed||1));document.getElementById('speed').value=speed;break;
+  case'set_time': playing=false;curTime=Math.max(0,Math.min(1,+m.t||0))*tMax*1.25;
+    document.getElementById('play').textContent='▶ Play';
+    document.getElementById('scrub').value=Math.min(1,curTime/(tMax*1.25));markDirty();break;
   case'request_metrics': postMetrics();break;
   case'hide_controls': ['#dock','#drawer-tab'].forEach(s=>document.querySelectorAll(s).forEach(el=>el.style.display='none'));break;
 }});
@@ -678,8 +746,15 @@ addEventListener('message',e=>{const m=e.data||{};switch(m.type){
   await loadStop(41,31);
   // drawer starts closed; dock is always visible at bottom
   parent.postMessage({type:'ready',panel:'reference'},'*');
-  requestAnimationFrame(t=>{lastT=t;frame(t);});
-  setInterval(postMetrics,2000);
+  /* WP1: metrics post on stop-change (loadStop) + on request_metrics — not a 2 s interval */
+  /* WP3: gate the render loop on visibility + on-screen; render only when dirty/animating */
+  document.addEventListener('visibilitychange',()=>{
+    visible=document.visibilityState!=='hidden'; if(visible)markDirty();});
+  try{const io=new IntersectionObserver(es=>{const on=es[es.length-1].isIntersecting;
+      if(on&&!onScreen)markDirty(); onScreen=on;},{threshold:0});
+    io.observe(document.getElementById('wrap'));}catch(_){}
+  addEventListener('resize',()=>{overlayDirty=true;markDirty();});
+  markDirty();   // kick the first frame
 }catch(err){document.getElementById('loading').textContent='reference error: '+err;
   console.error(err);} })();
 </script>
