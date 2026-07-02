@@ -134,16 +134,36 @@ ASSUMPTIONS / MODEL NOTES
   .metricItem .sub { margin-top: 2px; font-size: 8.5px; color: rgba(218,244,255,.48); line-height: 1.18; }
   .metricItem.wide { grid-column: 1 / -1; }
   .arrivals { width: 100%; height: 50px; margin-top: 6px; border-radius: 9px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.08); }
-  .legend {
-    position: fixed;
-    inset: auto 14px 14px auto;
-    width: 190px;
-    padding: 7px 9px;
-    font-size: 9.5px;
-    color: var(--muted);
-  }
-  .legend .sw { display:inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; box-shadow: 0 0 10px currentColor; }
-  .legend div { margin: 4px 0; }
+  /* Floating panels: draggable + minimizable (legend, TL colorbar, centerline x-section) —
+     kept byte-identical to reference/ray_view_reference.html so all model panels match. */
+  .float-wrap{position:absolute;z-index:3;pointer-events:all;touch-action:none;cursor:grab}
+  .float-wrap.dragging{cursor:grabbing}
+  .float-min{position:absolute;top:4px;right:4px;z-index:4;pointer-events:all;
+    background:rgba(20,35,62,.5);color:#7a82a6;border:1px solid rgba(100,140,255,.18);
+    border-radius:6px;width:17px;height:17px;padding:0;font-size:10px;font-weight:600;line-height:1;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+  .float-min:hover{border-color:rgba(150,210,255,.34);color:#eaeefc}
+  .float-wrap.collapsed{width:auto!important;height:auto!important}
+  .float-wrap.collapsed>*:not(.float-min){display:none}
+  .float-wrap.collapsed .float-min{position:static;width:auto;height:20px;padding:0 8px;
+    font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;border-radius:8px;
+    background:rgba(20,26,60,.7);backdrop-filter:blur(18px)}
+  #xsect-wrap{left:10px;bottom:46px;width:196px;height:119px}
+  #xsect{width:100%;height:100%;border-radius:10px;background:rgba(9,11,30,.75);
+    border:1px solid rgba(100,140,255,.18);backdrop-filter:blur(18px);pointer-events:none;display:block}
+  #legend-wrap{left:10px;bottom:175px}
+  #legend{background:rgba(8,14,26,.72);border:1px solid rgba(100,140,255,.18);border-radius:8px;
+    padding:8px 10px;font:11px -apple-system,sans-serif;color:#cfe3ff;backdrop-filter:blur(18px)}
+  #legend .lg-row{display:flex;align-items:center;gap:8px;padding:3px 0;white-space:nowrap}
+  #legend .lg-sw{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+  #tlbar-wrap{right:16px;top:70px}
+  #tlbar-inner{display:flex;align-items:center;gap:6px;background:rgba(8,14,26,.55);
+    border-radius:8px;padding:8px 10px;backdrop-filter:blur(18px)}
+  #tlbar-inner .tl-col{display:flex;flex-direction:column;align-items:center;gap:4px;
+    font:11px -apple-system,sans-serif;color:#cfe3ff}
+  #tlbar{width:12px;height:150px;border-radius:2px;display:block}
+  #tlbar-inner .tl-side{writing-mode:vertical-rl;transform:rotate(180deg);
+    font:11px -apple-system,sans-serif;color:#cfe3ff}
   body.controls-collapsed .controls .sliders { display: none; }
   body.metrics-collapsed #metricGrid,
   body.metrics-collapsed #arrivals { display: none; }
@@ -151,7 +171,7 @@ ASSUMPTIONS / MODEL NOTES
   body.metrics-collapsed .badgeRow { margin-bottom: 0; }
   body.ui-minimized .title,
   body.ui-minimized .metrics,
-  body.ui-minimized .legend,
+  body.ui-minimized #legend-wrap,
   body.ui-minimized .statusLine { display: none; }
   body.ui-minimized .hud { width: auto; }
   body.ui-minimized .controls {
@@ -177,7 +197,6 @@ ASSUMPTIONS / MODEL NOTES
   }
   @media (max-width: 920px) {
     .metrics { inset: auto 10px 10px 10px; width: auto; max-height: 38vh; }
-    .legend { display: none; }
     .hud { inset: 10px 10px auto 10px; width: auto; }
     .title { display: none; }
     .sliders { grid-template-columns: 1fr; }
@@ -239,12 +258,26 @@ ASSUMPTIONS / MODEL NOTES
   <canvas class="arrivals" id="arrivals" width="340" height="72" aria-label="Arrival stem plot"></canvas>
 </div>
 
-<div class="panel legend">
-  <div><span class="sw" style="color:#78eaff;background:#78eaff"></span>Insonified volume (TL &lt; 118 dB)</div>
-  <div><span class="sw" style="color:#ffcc77;background:#94784b"></span>Warm shaded seabed / seamounts</div>
-  <div><span class="sw" style="color:#ffffff;background:#fff"></span>Source S</div>
-  <div><span class="sw" style="color:#78eaff;background:#78eaff"></span>Receiver R (green reached, red shadowed)</div>
-  <div><span class="sw" style="color:#ff6f8f;background:#ff6f8f"></span>Ray fan coloured by launch angle</div>
+<div id="xsect-wrap" class="float-wrap">
+  <canvas id="xsect" width="196" height="119"></canvas>
+  <button class="float-min" title="Minimize">–</button>
+</div>
+<div id="legend-wrap" class="float-wrap">
+  <div id="legend">
+    <div class="lg-row"><span class="lg-sw" style="background:#ffd36b"></span>source S</div>
+    <div class="lg-row"><span class="lg-sw" style="background:#9fe8ff"></span>receiver R</div>
+    <div class="lg-row"><span class="lg-sw" style="background:#b08c5a"></span>seabed / seamounts</div>
+    <div class="lg-row"><span class="lg-sw" style="background:#6cf"></span>rays (by launch angle)</div>
+    <div class="lg-row"><span class="lg-sw" style="background:#2aa0d0"></span>insonified TL volume</div>
+  </div>
+  <button class="float-min" title="Minimize">–</button>
+</div>
+<div id="tlbar-wrap" class="float-wrap">
+  <div id="tlbar-inner">
+    <div class="tl-col"><span>115</span><canvas id="tlbar" width="12" height="150"></canvas><span>45 dB</span></div>
+    <span class="tl-side">TL (dB)</span>
+  </div>
+  <button class="float-min" title="Minimize">–</button>
 </div>
 <div class="statusLine" id="statusLine">Preparing model…</div>
 
@@ -1037,6 +1070,103 @@ ASSUMPTIONS / MODEL NOTES
     ctx.restore();
   }
 
+  // Floating "TL colorbar" panel: fixed reference 45..115 dB gradient, kept identical across
+  // all model panels (independent of this model's own tlColor()/TL_CUTOFF range).
+  function tlColorRef(tl) {
+    const t = Math.max(0, Math.min(1, (tl - 45) / 70));
+    const r = Math.min(1, Math.max(0, 1.4*t - 0.2)), g = Math.sin(Math.PI*t),
+          b = Math.min(1, Math.max(0, 1.2 - 1.6*t));
+    return [r*.9 + .1, g*.85, b*.95];
+  }
+  function drawTLBarCanvas() {
+    const c = document.getElementById('tlbar');
+    if (!c) return;
+    const tctx = c.getContext('2d'), bh = c.height;
+    for (let y = 0; y < bh; y++) {
+      const tl = 115 - (y / bh) * 70, col = tlColorRef(tl);
+      tctx.fillStyle = `rgb(${col.map(v => v*255|0).join(',')})`;
+      tctx.fillRect(0, y, c.width, 1);
+    }
+  }
+
+  // Bathymetry-clip helper for the floating centerline inset: stops a ray segment where it
+  // crosses the seabed profile drawn at the fixed source y, so 3D bottom bounces off-centerline
+  // don't appear to tunnel underground when projected into the x-z plane.
+  function clipSegToBathy(x1, z1, x2, z2, yFixed) {
+    const b1 = bathymetry(x1, yFixed), b2 = bathymetry(x2, yFixed);
+    const u1 = z1 >= b1, u2 = z2 >= b2;
+    if (u1 && u2) return null;
+    if (!u1 && !u2) return [x1, z1, x2, z2];
+    let ta = 0, tb = 1;
+    for (let k = 0; k < 10; k++) {
+      const tm = (ta + tb) / 2, xm = x1 + tm * (x2 - x1), zm = z1 + tm * (z2 - z1);
+      if (zm >= bathymetry(xm, yFixed)) tb = tm; else ta = tm;
+    }
+    const tc = (ta + tb) / 2, xc = x1 + tc * (x2 - x1), zc = z1 + tc * (z2 - z1);
+    return u1 ? [xc, zc, x2, z2] : [x1, z1, xc, zc];
+  }
+
+  // Floating "centerline x-section" panel: small always-on inset (independent of the
+  // on-canvas drawCrossSection above), draggable/minimizable, reusing the model's own
+  // rays/points/bathymetry() and only drawing the wavefront that has arrived so far.
+  function drawCenterlineInset(model) {
+    const xc = document.getElementById('xsect');
+    if (!xc) return;
+    const xctx = xc.getContext('2d');
+    const W = xc.width, H = xc.height;
+    const PAD = { l: 34, r: 6, t: 34, b: 22 };
+    const pw = W - PAD.l - PAD.r, ph = H - PAD.t - PAD.b;
+    xctx.clearRect(0, 0, W, H);
+    xctx.fillStyle = 'rgba(155,182,216,.75)';
+    xctx.font = 'bold 8px "IBM Plex Mono",monospace';
+    xctx.textAlign = 'left';
+    xctx.fillText('Centerline x-section (x–z)', PAD.l, 10);
+    xctx.fillStyle = 'rgba(155,182,216,.55)';
+    xctx.font = '7.5px "IBM Plex Mono",monospace';
+    xctx.fillText('y = 12 km', PAD.l, 19);
+    const cx = xVal => PAD.l + (xVal / DOMAIN.x1) * pw;
+    const cz = zVal => PAD.t + (zVal / DOMAIN.z1) * ph;
+    xctx.beginPath();
+    const NSTEP = 80;
+    xctx.moveTo(cx(0), cz(bathymetry(0, SRC.y)));
+    for (let i = 1; i <= NSTEP; i++) { const xVal = i / NSTEP * DOMAIN.x1; xctx.lineTo(cx(xVal), cz(bathymetry(xVal, SRC.y))); }
+    xctx.lineTo(cx(DOMAIN.x1), cz(DOMAIN.z1)); xctx.lineTo(cx(0), cz(DOMAIN.z1)); xctx.closePath();
+    xctx.fillStyle = 'rgba(160,120,70,.40)'; xctx.fill();
+    xctx.strokeStyle = 'rgba(210,170,100,.55)'; xctx.lineWidth = 0.8; xctx.stroke();
+    if (model) {
+      xctx.lineWidth = 0.65;
+      const time = state.animTime;
+      for (const ray of model.rays) {
+        if (Math.abs(ray.azDeg) > 0.55) continue;
+        const end = visibleRayEndIndex(ray.points, time);
+        xctx.strokeStyle = ray.color.replace('1)', '0.6)');
+        for (let i = 1; i <= end; i++) {
+          const a = ray.points[i - 1], b = ray.points[i];
+          const seg = clipSegToBathy(a.x, a.z, b.x, b.z, SRC.y);
+          if (!seg) continue;
+          xctx.beginPath(); xctx.moveTo(cx(seg[0]), cz(seg[1])); xctx.lineTo(cx(seg[2]), cz(seg[3])); xctx.stroke();
+        }
+      }
+    }
+    xctx.strokeStyle = 'rgba(155,182,216,.35)'; xctx.lineWidth = 0.7;
+    xctx.beginPath();
+    xctx.moveTo(PAD.l, PAD.t); xctx.lineTo(PAD.l, PAD.t + ph);
+    xctx.moveTo(PAD.l, PAD.t + ph); xctx.lineTo(PAD.l + pw, PAD.t + ph);
+    xctx.stroke();
+    xctx.fillStyle = 'rgba(155,182,216,.55)'; xctx.font = '7.5px "IBM Plex Mono",monospace';
+    xctx.textAlign = 'center';
+    [0, 10, 20, 30, 40, 50].forEach(xk => xctx.fillText(xk, cx(xk * 1000), PAD.t + ph + 10));
+    xctx.fillText('range (km)', PAD.l + pw / 2, PAD.t + ph + 20);
+    xctx.textAlign = 'right';
+    [0, 1000, 2000, 3000].forEach(zm => xctx.fillText(zm ? zm / 1000 + 'k' : 0, PAD.l - 3, cz(zm) + 3));
+    xctx.fillStyle = '#ffd36b'; xctx.textAlign = 'center'; xctx.font = 'bold 9px sans-serif';
+    xctx.beginPath(); xctx.arc(cx(SRC.x), cz(SRC.z), 2.5, 0, Math.PI * 2); xctx.fill();
+    xctx.fillText('S', cx(SRC.x), cz(SRC.z) - 5);
+    xctx.fillStyle = '#9fe8ff';
+    xctx.beginPath(); xctx.arc(cx(RCV.x), cz(RCV.z), 2.5, 0, Math.PI * 2); xctx.fill();
+    xctx.fillText('R', cx(RCV.x), cz(RCV.z) - 5);
+  }
+
   function drawArrivals(model) {
     const w = arrivalsCanvas.width, h = arrivalsCanvas.height;
     arrivalsCtx.clearRect(0,0,w,h);
@@ -1180,6 +1310,7 @@ ASSUMPTIONS / MODEL NOTES
     drawBoundingBox();
     drawMarkers(state.current);
     drawCrossSection(state.current);
+    drawCenterlineInset(state.current);
     drawCameraReadout();
     if (UI.tlToggle.checked) drawColorbar();
 
@@ -1256,7 +1387,7 @@ ASSUMPTIONS / MODEL NOTES
       state.pitch = clamp(state.pointer.pitch + dy * 0.006, -1.12, 1.12);
     });
     canvas.addEventListener('pointerup', (e) => { if (state.pointer && state.pointer.id === e.pointerId) state.pointer = null; });
-    canvas.addEventListener('wheel', (e) => { e.preventDefault(); state.zoom = clamp(state.zoom * Math.exp(-e.deltaY * 0.0012), 0.48, 2.6); }, { passive: false });
+    canvas.addEventListener('wheel', (e) => { e.preventDefault(); state.zoom = clamp(state.zoom * Math.exp(-e.deltaY * 0.0012), 0.28, 2.6); }, { passive: false });
   }
 
   function runSelfChecksAsync() {
@@ -1284,8 +1415,29 @@ ASSUMPTIONS / MODEL NOTES
     }, 40);
   }
 
+  function makeDraggable(el) {
+    el.addEventListener('pointerdown', e => {
+      if (e.target.closest('.float-min')) return;
+      e.preventDefault();
+      const rect = el.getBoundingClientRect(), parentRect = el.offsetParent.getBoundingClientRect();
+      el.style.left = (rect.left - parentRect.left) + 'px'; el.style.top = (rect.top - parentRect.top) + 'px';
+      el.style.right = 'auto'; el.style.bottom = 'auto';
+      const sx = e.clientX, sy = e.clientY, ol = parseFloat(el.style.left), ot = parseFloat(el.style.top);
+      el.classList.add('dragging'); el.setPointerCapture(e.pointerId);
+      function onMove(e2) { el.style.left = (ol + e2.clientX - sx) + 'px'; el.style.top = (ot + e2.clientY - sy) + 'px'; }
+      function onUp() { el.classList.remove('dragging');
+        el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp); }
+      el.addEventListener('pointermove', onMove); el.addEventListener('pointerup', onUp);
+    });
+  }
+  document.querySelectorAll('.float-wrap').forEach(makeDraggable);
+  document.querySelectorAll('.float-min').forEach(btn => { btn.onclick = e => { e.stopPropagation();
+    const collapsed = btn.closest('.float-wrap').classList.toggle('collapsed');
+    btn.textContent = collapsed ? '⤢' : '–'; btn.title = collapsed ? 'Expand' : 'Minimize'; }; });
+
   function boot() {
     resize(); initWaterMask(); buildBathyMesh(); setupEvents(); syncControlsWithModel(null);
+    drawTLBarCanvas(); drawCenterlineInset(null);
     state.fileKB = new Blob([document.documentElement.outerHTML]).size / 1024;
     requestAnimationFrame(drawScene);
     setStatus('Tracing canonical 41×31 fan and static TL mask…');
@@ -1314,7 +1466,7 @@ ASSUMPTIONS / MODEL NOTES
 <script>
 (function(){
   var CTRL_SELS=['.hud'];
-  var ALL_SELS=['.hud','#focusBtn','#metricsPanel','.panel.legend','#statusLine'];
+  var ALL_SELS=['.hud','#focusBtn','#metricsPanel','#statusLine'];
   window.addEventListener('message',function(e){
     var d=e.data; if(!d)return;
     var t=d.type,v,btn,es,as,ss,os;

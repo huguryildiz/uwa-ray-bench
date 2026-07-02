@@ -2,8 +2,8 @@
 <!-- ============================================================================
  HARNESS CHROME  (uwa-ray-bench)  — the "final UI" infra shell
  -----------------------------------------------------------------------------
- 5-panel model grid (Cinema tab, 3 cols × 2 rows) + BELLHOP3D reference
- (hidden in Cinema, shown in Compare/Scorecard):
+ 5-panel model grid (Overview tab, 3 cols × 2 rows) + BELLHOP3D reference
+ (hidden in Overview, shown in Compare/Scorecard):
    Fugu Ultra · Opus 4.8 max · GPT 5.5 XH  (top row)
    Gemini 3.1 Pro · Fable 5 (Max)  (second row)
  The five model panels are opaque outputs — loaded as iframes ONLY, never read.
@@ -231,15 +231,6 @@
     background:rgba(255,255,255,.12);outline:none;cursor:pointer}
   #tl-seek::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
     background:#d8fff0;box-shadow:0 0 8px rgba(57,255,133,.7);cursor:pointer}
-  #tl-time{font:500 10px var(--mono);color:var(--text-dim);white-space:nowrap;min-width:70px}
-  #tl-speed{appearance:none;font:500 10px var(--mono);color:var(--text);cursor:pointer;
-    padding:4px 22px 4px 9px;border-radius:7px;
-    border:1px solid var(--border);background:rgba(255,255,255,.06);
-    background-image:linear-gradient(45deg,transparent 50%,var(--text-dim) 50%),
-      linear-gradient(135deg,var(--text-dim) 50%,transparent 50%);
-    background-position:calc(100% - 11px) 52%,calc(100% - 7px) 52%;
-    background-size:4px 4px;background-repeat:no-repeat}
-  #tl-speed option{background:#080c22;color:var(--text)}
 
   /* ---------- compare header — visible only in compare tab ---------- */
   #compare-header{display:none;flex:none;margin:5px 12px 0;align-items:center;gap:10px;
@@ -268,16 +259,14 @@
   body.tab-fugu #grid,body.tab-opus #grid,body.tab-gpt #grid,
   body.tab-gemini #grid,body.tab-fable #grid,body.tab-reference #grid{
     grid-template-columns:1fr;grid-template-rows:1fr}
-  body.tab-scorecard #grid,
-  body.tab-physics #grid{height:0;min-height:0;margin:0;border:0;box-shadow:none;overflow:hidden}
+  body.tab-scorecard #grid{height:0;min-height:0;margin:0;border:0;box-shadow:none;overflow:hidden}
   body.tab-fugu .cell:not([data-id="fugu"]),
   body.tab-opus .cell:not([data-id="opus"]),
   body.tab-gpt .cell:not([data-id="gpt"]),
   body.tab-gemini .cell:not([data-id="gemini"]),
   body.tab-fable .cell:not([data-id="fable"]),
   body.tab-reference .cell:not([data-id="reference"]),
-  body.tab-scorecard .cell,
-  body.tab-physics .cell{
+  body.tab-scorecard .cell{
     position:absolute;top:0;left:-9999px;width:1px;height:1px;overflow:hidden;box-shadow:none}
   body.tab-compare .cell:not(.compare-active):not([data-id="reference"]){
     position:absolute;top:0;left:-9999px;width:1px;height:1px;overflow:hidden;box-shadow:none}
@@ -305,7 +294,7 @@
     background:
       radial-gradient(90% 70% at 50% 0%, color-mix(in srgb,var(--pc,#7b8cff) 15%,transparent) 0%,transparent 60%),
       radial-gradient(70% 60% at 50% 118%, color-mix(in srgb,var(--pc,#7b8cff) 10%,transparent) 0%,transparent 55%),
-      rgba(4,6,18,.92)}   /* WP4: opaque card — dropped the redundant blur pass (×4 in Cinema) */
+      rgba(4,6,18,.92)}   /* WP4: opaque card — dropped the redundant blur pass (×4 in Overview) */
   .poster::before{content:"";position:absolute;left:50%;top:50%;width:240px;height:240px;
     transform:translate(-50%,-50%);opacity:.5;pointer-events:none;
     background:repeating-radial-gradient(circle at 50% 50%,
@@ -313,6 +302,8 @@
     -webkit-mask:radial-gradient(circle at 50% 50%,#000 0%,transparent 70%);
             mask:radial-gradient(circle at 50% 50%,#000 0%,transparent 70%)}
   .poster>*{position:relative}
+  .poster-icon{width:40px;height:40px;color:var(--pc,#7b8cff);opacity:.92;margin-bottom:2px;
+    filter:drop-shadow(0 0 16px color-mix(in srgb,var(--pc,#7b8cff) 60%,transparent))}
   .poster-tag{font:700 8px var(--font);letter-spacing:.2em;text-transform:uppercase;color:var(--text-faint)}
   .poster-nm{font:600 20px var(--head);color:var(--text);
     text-shadow:0 0 22px color-mix(in srgb,var(--pc,#7b8cff) 55%,transparent)}
@@ -326,13 +317,8 @@
   body.tab-overview .cell.live-cell{box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--accent) 55%,transparent),
     inset 0 0 90px -14px rgba(57,255,133,.20);z-index:2}
   #scorecard-tab{display:none}
-  body.tab-scorecard #scorecard-tab,
-  body.tab-physics #scorecard-tab{display:contents}
-  body.tab-physics #score,
-  body.tab-physics #bars-panel,
-  body.tab-physics #glossary,
-  body.tab-physics .sect-div{display:none}
-  #score,#glossary,#physics{display:block}
+  body.tab-scorecard #scorecard-tab{display:contents}
+  #score,#glossary{display:block}
   .cell{position:relative;background:rgba(3,3,15,.82);overflow:hidden;min-width:0;min-height:0;transition:box-shadow var(--tr)}
   .cell iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
   .cell.focus{box-shadow:inset 0 0 0 2px rgba(57,255,133,.55),inset 0 0 70px -10px rgba(57,255,133,.18);z-index:2}
@@ -391,9 +377,16 @@
   @media (prefers-reduced-motion:reduce){.sect-div .wv,.sect-div .splash{animation:none}.sect-div .splash{opacity:.3}}
 
   /* ---------- themed scrollbar ---------- */
+  *{scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:6px;
+    border:2px solid var(--bg);background-clip:padding-box}
+  ::-webkit-scrollbar-thumb:hover{background:var(--accent-blue)}
+  ::-webkit-scrollbar-corner{background:transparent}
 
   /* ---------- scorecard ---------- */
-  #score,#glossary,#physics{flex:none;z-index:20;
+  #score,#glossary{flex:none;z-index:20;
     margin:0 12px;border-radius:var(--radius);
     background:rgba(8,10,30,.60);
     backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
@@ -401,19 +394,29 @@
     box-shadow:var(--lift),inset 0 1px 0 rgba(255,255,255,.08);
     padding:28px 32px 36px}
   #score-table-wrap{overflow-x:auto}
-#score .hd,#glossary .hd,#physics .hd{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:11px}
-  #score h3,#glossary h3,#physics h3{margin:0;font:600 30px var(--head);letter-spacing:-.01em;
+#score .hd,#glossary .hd{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:11px}
+  #score h3,#glossary h3{margin:0;font:600 30px var(--head);letter-spacing:-.01em;
     background:linear-gradient(110deg,#eaeefc 0%,#b8c4ff 55%,#7b8cff 100%);
     -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-  #score h3 em,#glossary h3 em,#physics h3 em{font-style:italic;
+  #score h3 em,#glossary h3 em{font-style:italic;
     background:linear-gradient(110deg,#39ff85 0%,#2dd4bf 100%);
     -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-  #score .sub,#glossary .sub,#physics .sub{margin:0;font-size:11px;color:var(--text-dim)}
+  #score .sub,#glossary .sub{margin:0;font-size:11px;color:var(--text-dim)}
   #score table{border-collapse:collapse;width:100%;font:500 11.5px var(--mono);font-variant-numeric:tabular-nums}
   #score th{font:600 8px var(--font);letter-spacing:.13em;text-transform:uppercase;color:var(--text-dim);
     padding:0 9px 7px;text-align:right;border-bottom:1px solid var(--border)}
   #score th:first-child{text-align:left}
+  .score-sort{appearance:none;border:0;background:transparent;color:inherit;font:inherit;
+    letter-spacing:inherit;text-transform:inherit;padding:0;margin:0;cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;white-space:nowrap}
+  .score-sort:hover,.score-sort:focus-visible{color:var(--text);outline:none}
+  .score-sort.active{color:var(--accent);text-shadow:0 0 10px rgba(57,255,133,.35)}
+  .score-dir{opacity:.4;font-size:9px;font-weight:400}
+  .score-ind{opacity:.55;font-size:8px;font-weight:600;min-width:7px}
+  .score-sort.active .score-ind{opacity:1;color:var(--accent-cyan)}
   #score td{padding:7px 9px;text-align:right;border-bottom:1px solid rgba(100,140,255,.06)}
+  #score th.col-composite,#score td.col-composite{background:rgba(123,140,255,.10)}
+  #score tr.refrow td.col-composite{background:rgba(123,140,255,.16)}
   #score td:first-child{text-align:left;font-family:var(--font);font-weight:600}
   #score tr:last-child td{border-bottom:0}
   #score td.best{color:var(--accent);font-weight:600}
@@ -467,7 +470,10 @@
     box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}
   .bc-hd{font:600 8px var(--font);letter-spacing:.15em;text-transform:uppercase;
     color:var(--text-dim);margin-bottom:10px;text-align:center}
-  .bc-chart{display:flex;align-items:flex-end;height:72px;gap:8px}
+  .bc-chart{position:relative;display:flex;align-items:flex-end;height:72px;gap:8px}
+  .bc-refline{position:absolute;left:0;right:0;border-top:1px dashed var(--text-dim);opacity:.55;pointer-events:none}
+  .bc-refline-lbl{position:absolute;right:0;top:-13px;font:500 7px var(--mono);letter-spacing:.03em;
+    color:var(--text-dim);white-space:nowrap}
   .bc-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:3px}
   .bc-val-v{font:500 9px var(--mono);white-space:nowrap;line-height:1}
   .bc-bar-v{width:100%;border-radius:2px 2px 0 0;min-height:2px;
@@ -479,7 +485,7 @@
   /* ---------- metric glossary cards ---------- */
   .gloss-legend{margin:2px 0 0;font-size:11px;color:var(--text-dim);line-height:1.7}
   .gloss-legend math{color:var(--text);font-size:13px;vertical-align:-.1em}
-  #metric-cards,#physics-cards{margin-top:16px;display:grid;
+  #metric-cards{margin-top:16px;display:grid;
     grid-template-columns:repeat(auto-fill,minmax(296px,1fr));gap:14px}
   .mc{position:relative;padding:16px 16px 15px;border-radius:var(--radius-sm);
     border:1px solid var(--border);
@@ -551,7 +557,7 @@
     #bar-actions .pop{position:static;margin-top:4px;min-width:0;width:100%;
       box-shadow:none;background:rgba(255,255,255,.04)}
 
-    /* grid fills viewport height — Cinema stacks all 5 model panels 1×5 */
+    /* grid fills viewport height — Overview stacks all 5 model panels 1×5 */
     #grid{height:calc(100svh - 132px)}
     body.tab-overview #grid{grid-template-columns:1fr;grid-template-rows:repeat(5,1fr)}
     #score-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -559,12 +565,12 @@
 
     /* scorecard — tighter chrome, bar-charts stacked 1 column */
     .sect-div{margin:10px 12px}
-    #score,#glossary,#physics{padding:20px 14px 24px;margin:0}
-    #score h3,#glossary h3,#physics h3{font-size:19px}
+    #score,#glossary{padding:20px 14px 24px;margin:0}
+    #score h3,#glossary h3{font-size:19px}
     #bars-panel{padding:18px 14px 20px;margin:0 8px}
     #bars-panel h3{font-size:19px}
     #score-bars{grid-template-columns:1fr}
-    #metric-cards,#physics-cards{grid-template-columns:1fr}
+    #metric-cards{grid-template-columns:1fr}
 
     /* diff modal fits the viewport */
     #diffbox{padding:18px 16px 16px;max-width:94vw}
@@ -608,8 +614,9 @@
     appearance:none;background:rgba(6,8,24,.82);
     border:1px solid var(--border);border-left:0;
     border-radius:0 var(--radius-sm) var(--radius-sm) 0;
-    color:var(--text-dim);cursor:pointer;padding:10px 6px;
-    font:700 9px var(--font);letter-spacing:.12em;text-transform:uppercase;
+    color:var(--text-dim);cursor:pointer;padding:20px 11px;
+    font:700 11px var(--font);letter-spacing:.18em;text-transform:uppercase;
+    box-shadow:4px 0 24px rgba(0,0,0,.5);
     backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
     transition:var(--tr)}
   .sc-reopen:hover{color:var(--accent);border-color:rgba(57,255,133,.35)}
@@ -622,6 +629,7 @@
   .sc-sec{padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);display:flex;flex-direction:column;gap:5px}
   .sc-sec:last-child{border-bottom:0}
   .sc-lbl{font:700 8px var(--font);letter-spacing:.18em;text-transform:uppercase;color:var(--text-faint);margin-bottom:1px}
+  .sc-hint{font:400 9.5px var(--font);line-height:1.35;color:var(--text-faint);margin:-2px 0 3px}
   .sc-btn{width:100%;appearance:none;cursor:pointer;border:1px solid var(--border);border-radius:var(--radius-sm);
     padding:7px 10px;font:600 11px var(--font);color:var(--text-dim);background:rgba(255,255,255,.05);
     text-align:left;transition:var(--tr);line-height:1.3}
@@ -635,11 +643,22 @@
   .sc-canon:hover{border-color:rgba(123,140,255,.34)!important;background:rgba(123,140,255,.11)!important}
   .sc-row2{display:flex;gap:5px}
   .sc-row2 .sc-btn{flex:1}
+  .sc-row2 .sc-icon{text-align:center;letter-spacing:.02em}
+  .sc-icon-glyph{font-size:15px;vertical-align:-1px;display:inline-block}
   .sc-field{display:flex;align-items:center;justify-content:space-between;gap:4px;
     font-size:11px;color:var(--text-dim)}
   .sc-field>span{flex:0 0 auto;font-size:10px}
   .sc-rng{width:100%;margin:2px 0;accent-color:var(--accent)}
-  .sc-time{font:400 9px var(--mono);color:var(--text-faint);text-align:center;margin-top:-2px}
+  #sim-ctrl input[type=range]{-webkit-appearance:none;appearance:none;height:3px;flex:none;border-radius:3px;
+    background:linear-gradient(90deg,var(--accent-blue),var(--accent-cyan));outline:none;cursor:pointer}
+  #sim-ctrl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+    background:#eafff6;box-shadow:0 0 10px rgba(57,255,133,.8);cursor:pointer}
+  .sc-lbl2{font-size:10px;color:var(--text-dim);margin-top:2px}
+  .sc-rng-row{display:flex;align-items:center;gap:8px}
+  .sc-rng-row .sc-rng{flex:1;width:auto}
+  .sc-time{font:500 10px var(--mono);color:var(--text);flex:0 0 auto}
+  .sc-rng-lbl{margin-top:2px}
+  .sc-rng-lbl+.sc-rng{margin-top:0}
   #main{margin-left:220px;flex:1;display:flex;flex-direction:column;min-width:0;transition:margin-left var(--tr)}
   #ctrl-toggle{display:none;align-items:center;justify-content:center;
     appearance:none;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);
@@ -687,10 +706,9 @@
   <button class="lnk" id="hamburger" aria-label="Toggle menu" aria-controls="bar-actions" aria-expanded="false"><span class="ham-ico"></span></button>
   <div id="bar-actions">
     <button id="ctrl-toggle" onclick="document.body.classList.toggle('ctrl-open')" aria-label="Toggle controls">⊟ Controls</button>
-    <button class="tab-btn act" id="cinema-btn" data-tab="overview">⊙ Cinema</button>
+    <button class="tab-btn act" id="overview-btn" data-tab="overview">⊙ Overview</button>
     <button class="tab-btn" data-tab="compare">⊞ Compare</button>
     <button class="tab-btn" data-tab="scorecard">★ Scorecard</button>
-    <button class="tab-btn" data-tab="physics">∂ Physics</button>
   </div>
   <span id="readout">Hover a panel for c(z) · D(x,y)</span>
 </div>
@@ -704,44 +722,55 @@
   </div>
   <div class="sc-sec">
     <div class="sc-lbl">Fan Beams</div>
-    <label class="sc-field"><span>Elevation</span><select class="sel" id="elevsel"></select></label>
-    <label class="sc-field"><span>Azimuth</span><select class="sel" id="azimsel"></select></label>
-    <button class="sc-btn sc-canon" id="canon">⊹ Canonical 41×31</button>
+    <div class="sc-hint">Rays per fan, spread across a fixed ±20° vertical / ±15° horizontal sweep</div>
+    <div class="sc-lbl2">Elevation</div>
+    <div class="sc-rng-row">
+      <input type="range" class="sc-rng" id="elevsel" min="0" max="4" step="1" value="2" title="Number of rays across the ±20° vertical launch fan">
+      <span class="sc-time" id="elevsel-val">41</span>
+    </div>
+    <div class="sc-lbl2">Azimuth</div>
+    <div class="sc-rng-row">
+      <input type="range" class="sc-rng" id="azimsel" min="0" max="4" step="1" value="2" title="Number of rays across the ±15° horizontal launch fan">
+      <span class="sc-time" id="azimsel-val">31</span>
+    </div>
+    <button class="sc-btn sc-canon" id="canon" title="The single scored operating point — every model's official result is measured here">⊹ Canonical 41×31</button>
   </div>
   <div class="sc-sec">
     <div class="sc-lbl">Playback</div>
     <div class="sc-row2">
-      <button class="sc-btn sc-play" id="play">▶ Play all</button>
-      <button class="sc-btn" id="reset" title="Reset all">⟲</button>
+      <button class="sc-btn sc-play" id="play" title="Play or pause the ray animation on all panels">▶ Play all</button>
+      <button class="sc-btn sc-icon" id="reset" title="Reset all panels to the start of the animation"><span class="sc-icon-glyph">⟲</span> Reset</button>
     </div>
-    <input type="range" class="sc-rng" id="tl-seek" min="0" max="100" value="0">
-    <div class="sc-time" id="tl-time">— / —</div>
-    <label class="sc-field">
-      <span>Speed</span>
-      <select class="sel" id="tl-speed">
-        <option value="0.25">0.25×</option>
-        <option value="0.5">0.5×</option>
-        <option value="1" selected>1×</option>
-        <option value="2">2×</option>
-        <option value="4">4×</option>
-      </select>
-    </label>
+    <div class="sc-lbl2">Scrub position</div>
+    <div class="sc-rng-row">
+      <input type="range" class="sc-rng" id="tl-seek" min="0" max="100" value="0" title="Drag to jump all panels to a point in the ray animation">
+      <span class="sc-time" id="tl-time">0%</span>
+    </div>
+    <div class="sc-lbl2">Speed</div>
+    <div class="sc-rng-row">
+      <input type="range" class="sc-rng" id="tl-speed" min="0" max="4" step="1" value="2" title="Adjust the ray animation playback speed">
+      <span class="sc-time" id="tl-speed-val">1×</span>
+    </div>
   </div>
   <div class="sc-sec">
     <div class="sc-lbl">Volume</div>
-    <label class="sc-field"><span>TL volume</span><input type="checkbox" id="volchk" checked></label>
-    <input type="range" class="sc-rng" id="opac" min="0" max="1" step="0.02" value="0.5">
+    <label class="sc-field"><span title="Show or hide the insonified-volume overlay (transmission-loss point cloud)">TL volume</span><input type="checkbox" id="volchk" checked></label>
+    <div class="sc-lbl2">Opacity</div>
+    <div class="sc-rng-row">
+      <input type="range" class="sc-rng" id="opac" min="0" max="1" step="0.02" value="0.5" title="Adjust the transparency of the TL volume overlay">
+      <span class="sc-time" id="opac-val">50%</span>
+    </div>
   </div>
   <div class="sc-sec">
     <div class="sc-lbl">Camera</div>
-    <button class="sc-btn" id="camreset">⌖ Reset Camera</button>
+    <button class="sc-btn" id="camreset" title="Return the 3D camera to its default framing">⌖ Reset Camera</button>
   </div>
 </div>
 
 <div id="main">
 <section id="hero-score">
   <div id="winner-badge">
-    <span class="wb-tag" title="Weighted physics winner: 55% core TL error, 25% shadow-mask error, 15% receiver TL error, 5% consistency. Close ties go to |Δy| closest to BELLHOP3D.">★ leader</span>
+    <span class="wb-tag" title="Composite Benchmark Score (60% Field + 20% Coverage + 20% Geometry fidelity), computed for every canonical model. Not the only result — see the Scorecard tab for per-axis leaders.">★ composite</span>
     <span class="wb-name" id="winner-name">—</span>
     <span class="wb-score" id="winner-score">awaiting canonical metrics</span>
   </div>
@@ -750,6 +779,8 @@
     <div id="hero-bars"></div>
   </div>
 </section>
+
+<div class="sect-div" aria-hidden="true"><div class="wv wv1"></div><div class="wv wv2"></div><div class="splash"></div></div>
 
 <div id="compare-header">
   <span id="compare-model-lbl">Model</span>
@@ -765,58 +796,68 @@
 </div>
 
 <div id="grid">
-  <div class="cell" data-id="fugu">
-    <div class="focus-overlay" data-focus="fugu"></div>
-    <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"/><path d="M18 12v.5"/><path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"/><path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"/><path d="M10.46 7.26C10.2 5.88 9.17 4.24 8 3h5.8a2 2 0 0 1 1.98 1.67l.23 1.4"/><path d="m16.01 17.93-.23 1.4A2 2 0 0 1 13.8 21H9.5a5.96 5.96 0 0 0 1.49-3.98"/></svg><span class="nm">Sakana Fugu</span><span class="tag">ultra · model</span></div>
-    <iframe data-id="fugu" data-src="../models/fugu/ray_view.html" title="Sakana Fugu"></iframe>
-    <div class="wait"><div class="ring"></div>Awaiting Fugu panel…</div>
-    <div class="poster"><span class="poster-tag">model preview</span><span class="poster-nm">Sakana Fugu</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
-  <div class="cell" data-id="opus">
-    <div class="focus-overlay" data-focus="opus"></div>
-    <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(350 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(20 12 12)"/><rect x="10.5" y="1" width="3.0" height="6.5" rx="0.5" transform="rotate(50 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(75 12 12)"/><rect x="11.3" y="1" width="1.4" height="6.5" rx="0.5" transform="rotate(100 12 12)"/><rect x="10.5" y="1" width="3.0" height="6.5" rx="0.5" transform="rotate(128 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(152 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(175 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(200 12 12)"/><rect x="11.3" y="1" width="1.4" height="6.5" rx="0.5" transform="rotate(225 12 12)"/><rect x="10.5" y="1" width="3.0" height="6.5" rx="0.5" transform="rotate(255 12 12)"/><rect x="11.0" y="1" width="2.0" height="6.5" rx="0.5" transform="rotate(282 12 12)"/><rect x="10.5" y="1" width="3.0" height="6.5" rx="0.5" transform="rotate(316 12 12)"/></svg><span class="nm">Opus 4.8</span><span class="tag">max · model</span></div>
-    <iframe data-id="opus" data-src="../models/opus/ray_view.html" title="Opus 4.8"></iframe>
-    <div class="wait"><div class="ring"></div>Awaiting Opus panel…</div>
-    <div class="poster"><span class="poster-tag">model preview</span><span class="poster-nm">Opus 4.8</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
-  <div class="cell" data-id="gpt">
-    <div class="focus-overlay" data-focus="gpt"></div>
-    <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg><span class="nm">GPT 5.5</span><span class="tag">extra high · model</span></div>
-    <iframe data-id="gpt" data-src="../models/gpt/ray_view.html" title="GPT 5.5"></iframe>
-    <div class="wait"><div class="ring"></div>Awaiting GPT panel…</div>
-    <div class="poster"><span class="poster-tag">model preview</span><span class="poster-nm">GPT 5.5</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
+  <div class="cell" data-id="reference">
+    <div class="focus-overlay" data-focus="reference"></div>
+    <div class="chip ref"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="1.5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M8.5 15.5a5 5 0 0 1 0-7"/><path d="M18.5 5.5a10 10 0 0 1 0 13"/><path d="M5.5 18.5a10 10 0 0 1 0-13"/></svg><span class="nm">BELLHOP3D</span><span class="tag">reference · BELLHOP3D solver</span></div>
+    <iframe data-id="reference" data-src="../reference/ray_view_reference.html" title="BELLHOP3D reference"></iframe>
+    <div class="wait"><div class="ring"></div>Loading reference…</div>
+    <div class="poster"><svg class="poster-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="1.5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M8.5 15.5a5 5 0 0 1 0-7"/><path d="M18.5 5.5a10 10 0 0 1 0 13"/><path d="M5.5 18.5a10 10 0 0 1 0-13"/></svg><span class="poster-tag">reference preview</span><span class="poster-nm">BELLHOP3D</span><span class="poster-stat">BELLHOP3D reference · 3D ray trace</span><span class="poster-cta">▶ View standalone</span></div></div>
+  <div class="cell" data-id="fable">
+    <div class="focus-overlay" data-focus="fable"></div>
+    <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg><span class="nm">Fable 5</span><span class="tag">max · model</span></div>
+    <iframe data-id="fable" data-src="../models/fable/ray_view.html" title="Fable 5"></iframe>
+    <div class="wait"><div class="ring"></div>Awaiting Fable panel…</div>
+    <div class="poster"><svg class="poster-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg><span class="poster-tag">model preview</span><span class="poster-nm">Fable 5</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
   <div class="cell" data-id="gemini">
     <div class="focus-overlay" data-focus="gemini"></div>
     <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C12 2 13.5 8.75 17.5 12C13.5 15.25 12 22 12 22C12 22 10.5 15.25 6.5 12C10.5 8.75 12 2 12 2Z"/><path d="M2 12C2 12 8.75 10.5 12 6.5C15.25 10.5 22 12 22 12C22 12 15.25 13.5 12 17.5C8.75 13.5 2 12 2 12Z"/></svg><span class="nm">Gemini 3.1 Pro</span><span class="tag">high · model</span></div>
     <iframe data-id="gemini" data-src="../models/gemini/ray_view.html" title="Gemini 3.1 Pro"></iframe>
     <div class="wait"><div class="ring"></div>Awaiting Gemini panel…</div>
-    <div class="poster"><span class="poster-tag">model preview</span><span class="poster-nm">Gemini 3.1 Pro</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
-  <div class="cell" data-id="fable">
-    <div class="focus-overlay" data-focus="fable"></div>
-    <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2Z"/><path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7Z"/></svg><span class="nm">Fable 5 (Max)</span><span class="tag">model</span></div>
-    <iframe data-id="fable" data-src="../models/fable/ray_view.html" title="Fable 5 (Max)"></iframe>
-    <div class="wait"><div class="ring"></div>Awaiting Fable panel…</div>
-    <div class="poster"><span class="poster-tag">model preview</span><span class="poster-nm">Fable 5 (Max)</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
-  <div class="cell" data-id="reference">
-    <div class="focus-overlay" data-focus="reference"></div>
-    <div class="chip ref"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="1.5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M8.5 15.5a5 5 0 0 1 0-7"/><path d="M18.5 5.5a10 10 0 0 1 0 13"/><path d="M5.5 18.5a10 10 0 0 1 0-13"/></svg><span class="nm">BELLHOP3D</span><span class="tag">reference · ground truth</span></div>
-    <iframe data-id="reference" data-src="../reference/ray_view_reference.html" title="BELLHOP3D reference"></iframe>
-    <div class="wait"><div class="ring"></div>Loading reference…</div>
-    <div class="poster"><span class="poster-tag">reference preview</span><span class="poster-nm">BELLHOP3D</span><span class="poster-stat">ground truth · 3D ray trace</span><span class="poster-cta">▶ View standalone</span></div></div>
+    <div class="poster"><svg class="poster-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C12 2 13.5 8.75 17.5 12C13.5 15.25 12 22 12 22C12 22 10.5 15.25 6.5 12C10.5 8.75 12 2 12 2Z"/><path d="M2 12C2 12 8.75 10.5 12 6.5C15.25 10.5 22 12 22 12C22 12 15.25 13.5 12 17.5C8.75 13.5 2 12 2 12Z"/></svg><span class="poster-tag">model preview</span><span class="poster-nm">Gemini 3.1 Pro</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
+  <div class="cell" data-id="gpt">
+    <div class="focus-overlay" data-focus="gpt"></div>
+    <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg><span class="nm">GPT 5.5</span><span class="tag">extra high · model</span></div>
+    <iframe data-id="gpt" data-src="../models/gpt/ray_view.html" title="GPT 5.5"></iframe>
+    <div class="wait"><div class="ring"></div>Awaiting GPT panel…</div>
+    <div class="poster"><svg class="poster-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg><span class="poster-tag">model preview</span><span class="poster-nm">GPT 5.5</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
+  <div class="cell" data-id="opus">
+    <div class="focus-overlay" data-focus="opus"></div>
+    <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg><span class="nm">Opus 4.8</span><span class="tag">max · model</span></div>
+    <iframe data-id="opus" data-src="../models/opus/ray_view.html" title="Opus 4.8"></iframe>
+    <div class="wait"><div class="ring"></div>Awaiting Opus panel…</div>
+    <div class="poster"><svg class="poster-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg><span class="poster-tag">model preview</span><span class="poster-nm">Opus 4.8</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
+  <div class="cell" data-id="fugu">
+    <div class="focus-overlay" data-focus="fugu"></div>
+    <div class="chip"><i class="dot"></i><svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"/><path d="M18 12v.5"/><path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"/><path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"/><path d="M10.46 7.26C10.2 5.88 9.17 4.24 8 3h5.8a2 2 0 0 1 1.98 1.67l.23 1.4"/><path d="m16.01 17.93-.23 1.4A2 2 0 0 1 13.8 21H9.5a5.96 5.96 0 0 0 1.49-3.98"/></svg><span class="nm">Sakana Fugu</span><span class="tag">ultra · model</span></div>
+    <iframe data-id="fugu" data-src="../models/fugu/ray_view.html" title="Sakana Fugu"></iframe>
+    <div class="wait"><div class="ring"></div>Awaiting Fugu panel…</div>
+    <div class="poster"><svg class="poster-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"/><path d="M18 12v.5"/><path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"/><path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"/><path d="M10.46 7.26C10.2 5.88 9.17 4.24 8 3h5.8a2 2 0 0 1 1.98 1.67l.23 1.4"/><path d="m16.01 17.93-.23 1.4A2 2 0 0 1 13.8 21H9.5a5.96 5.96 0 0 0 1.49-3.98"/></svg><span class="poster-tag">model preview</span><span class="poster-nm">Sakana Fugu</span><span class="poster-stat">awaiting score</span><span class="poster-cta">▶ Open comparison</span></div></div>
 </div>
 
 <div id="scorecard-tab">
 <div id="score">
   <div class="hd"><h3>Score<em>card</em></h3></div>
   <div id="score-table-wrap"><table id="scoretbl"></table></div>
-  <p class="note"><b style="color:var(--text-dim)">Leader</b> is a weighted physics score:
-    55% core TL error, 25% shadow-mask error, 15% receiver TL error, and 5% reciprocity/convergence
-    consistency. <b style="color:var(--text-dim)">Core RMSE</b> is measured over BELLHOP-insonified
-    cells with TL clamped at the 120 dB shadow cutoff. Scores within 2 points are broken by whose
-    out-of-plane |Δy| is closest to BELLHOP3D; FPS is reported but does not affect the leader.</p>
+  <p class="note"><b style="color:var(--text-dim)">Field</b>, <b style="color:var(--text-dim)">Coverage</b>,
+    and <b style="color:var(--text-dim)">Geometry</b> are three separate fidelity questions (TL
+    field accuracy, shadow-mask accuracy, out-of-plane accuracy vs the BELLHOP3D reference solver)
+    that are never collapsed into one number. <b style="color:var(--text-dim)">Composite</b> — the
+    first column, sorted highest-first by default — is a secondary 60/20/20 blend of the three,
+    shown for convenience; it is not the scientific result.
+    <b style="color:var(--text-dim)">Core err</b> uses a winsorized (outlier-clipped) RMSE over
+    BELLHOP-insonified cells so isolated caustic-adjacent spikes don't dominate. Tie-breaking is
+    deterministic: lower core error, then lower coverage error, then lower receiver error, then
+    panel id — never a "within N points" window. Each panel's numerical self-check (reciprocity,
+    convergence, canonical-grid integrity — <b style="color:var(--ok)">Qualified</b> /
+    <b style="color:var(--warn)">Provisional</b> / <b style="color:var(--err)">Invalid</b>) is
+    informational and does not gate ranking eligibility.</p>
 </div>
+
+<div class="sect-div" aria-hidden="true"><div class="wv wv1"></div><div class="wv wv2"></div><div class="splash"></div></div>
 
 <div id="bars-panel">
   <div class="hd"><h3>Visual <em>comparison</em></h3>
-    <p class="sub">Per-metric bar comparison across all models vs BELLHOP3D reference</p></div>
+    <p class="sub">Per-metric bar comparison across all models vs BELLHOP3D reference — best on the left, worst on the right</p></div>
   <div id="score-bars"></div>
 </div>
 
@@ -840,43 +881,36 @@
     <div class="mc g">
       <div class="mc-hd">
         <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 14.7 8.5 21 9.4 16.5 13.8 17.6 20 12 17.1 6.4 20 7.5 13.8 3 9.4 9.3 8.5 12 3Z"/></svg></span>
-        <span class="mc-t"><b>Leader score</b><span>weighted physics · points</span></span>
-        <span class="mc-badge">leader</span>
+        <span class="mc-t"><b>Field Fidelity</b><span>TL field accuracy · 0–100</span></span>
+        <span class="mc-badge">headline</span>
       </div>
       <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
-        <mrow><mi>S</mi><mo>=</mo><mn>100</mn><mo>(</mo><mn>0.55</mn><msub><mi>E</mi><mtext>TL</mtext></msub><mo>+</mo>
-        <mn>0.25</mn><msub><mi>E</mi><mtext>mask</mtext></msub><mo>+</mo>
-        <mn>0.15</mn><msub><mi>E</mi><mi>R</mi></msub><mo>+</mo>
-        <mn>0.05</mn><msub><mi>E</mi><mtext>cons</mtext></msub><mo>)</mo></mrow>
+        <mrow><msub><mi>E</mi><mtext>field</mtext></msub><mo>=</mo><mn>0.50</mn><msub><mi>E</mi><mtext>core</mtext></msub><mo>+</mo>
+        <mn>0.25</mn><msub><mi>E</mi><mtext>smooth</mtext></msub><mo>+</mo>
+        <mn>0.25</mn><msub><mi>E</mi><mtext>recv</mtext></msub></mrow>
       </math></div>
-      <p class="mc-desc">Lower wins. Core TL error is normalized by 25 dB; mask error averages false-shadow and false-light rates; receiver TL error is capped at 25 dB; consistency blends reciprocity and convergence caps. Close ties go to the model whose out-of-plane |Δy| is nearest BELLHOP3D.</p>
-    </div>
-
-    <div class="mc g">
-      <div class="mc-hd">
-        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 4H7l6 8-6 8h10"/></svg></span>
-        <span class="mc-t"><b>TL RMSE</b><span>full-field error · dB</span></span>
-      </div>
-      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
-        <msqrt><mrow><mfrac><mn>1</mn><mi>N</mi></mfrac>
-        <munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>N</mi></munderover>
-        <msup><mrow><mo>(</mo><msub><mover><mi>T</mi><mo>^</mo></mover><mi>i</mi></msub><mo>−</mo><msub><mi>T</mi><mi>i</mi></msub><mo>)</mo></mrow><mn>2</mn></msup></mrow></msqrt>
-      </math></div>
-      <p class="mc-desc">Root-mean-square gap between the model's transmission-loss field and BELLHOP3D over every cell of the 101×49×31 grid, shadow zones included. Lower means the whole field tracks ground truth.</p>
+      <p class="mc-desc">100×(1 − clamp(E<sub>field</sub>, 0, 1)). Higher wins. How close the predicted TL field is to BELLHOP3D — the primary "did the physics track the reference" question, kept separate from mask and geometry accuracy.</p>
     </div>
 
     <div class="mc g">
       <div class="mc-hd">
         <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span>
-        <span class="mc-t"><b>Core RMSE</b><span>insonified error · dB</span></span>
-        <span class="mc-badge">leader</span>
+        <span class="mc-t"><b>Core err</b><span>robust insonified error · dB</span></span>
       </div>
       <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
         <msqrt><mrow><mfrac><mn>1</mn><mrow><mo>|</mo><mi>C</mi><mo>|</mo></mrow></mfrac>
         <munder><mo>∑</mo><mrow><mi>i</mi><mo>∈</mo><mi>C</mi></mrow></munder>
-        <msup><mrow><mo>(</mo><msub><mover><mi>T</mi><mo>^</mo></mover><mi>i</mi></msub><mo>−</mo><msub><mi>T</mi><mi>i</mi></msub><mo>)</mo></mrow><mn>2</mn></msup></mrow></msqrt>
+        <msup><mrow><mo>(</mo><mtext>clip</mtext><mo>(</mo><msub><mover><mi>T</mi><mo>^</mo></mover><mi>i</mi></msub><mo>−</mo><msub><mi>T</mi><mi>i</mi></msub><mo>,</mo><mn>20</mn><mo>)</mo><mo>)</mo></mrow><mn>2</mn></msup></mrow></msqrt>
       </math></div>
-      <p class="mc-desc">RMSE over cells BELLHOP3D marks as insonified — <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>C</mi><mo>=</mo><mo>{</mo><mi>i</mi><mo>:</mo><msub><mi>T</mi><mi>i</mi></msub><mo>&lt;</mo><mn>120</mn><mo>}</mo></math> dB — with model TL clamped at 120 dB. This is the dominant 55% term in the leader score.</p>
+      <p class="mc-desc">RMSE over BELLHOP-insonified cells <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>C</mi><mo>=</mo><mo>{</mo><mi>i</mi><mo>:</mo><msub><mi>T</mi><mi>i</mi></msub><mo>&lt;</mo><mn>120</mn><mo>}</mo></math> dB, but each per-cell residual is winsorized (clipped) to ±20 dB before squaring — a robust statistic so isolated caustic-adjacent spikes (a known soft spot of geometric-spreading TL) don't dominate. The dominant 50% term of Field Fidelity.</p>
+    </div>
+
+    <div class="mc g">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17h16"/><path d="M4 12h16" opacity=".5"/><path d="M4 7h16" opacity=".25"/></svg></span>
+        <span class="mc-t"><b>Smoothed err</b><span>large-scale TL error · dB</span></span>
+      </div>
+      <p class="mc-desc">Core-region RMSE after a 3×3×3 box blur is applied to both the model and BELLHOP3D fields first. Isolates whether large-scale energy distribution tracks the reference, separately from fine interference-pattern (constructive/destructive) mismatch. 25% of Field Fidelity.</p>
     </div>
 
     <div class="mc b">
@@ -889,7 +923,7 @@
         <msub><mi>log</mi><mn>10</mn></msub>
         <mfrac><mrow><mo>|</mo><mi>p</mi><mo>(</mo><mi>R</mi><mo>)</mo><mo>|</mo></mrow><msub><mi>p</mi><mtext>ref</mtext></msub></mfrac></mrow>
       </math></div>
-      <p class="mc-desc">The transmission loss in dB at the single receiver point <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>R</mi></math> each panel reports. It anchors agreement at the one scored operating point (canonical 41×31).</p>
+      <p class="mc-desc">The transmission loss in dB at the single receiver point <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>R</mi></math> each panel reports (canonical 41×31). Labeled a <b>single-receiver diagnostic</b> — the harness code accepts an array of receiver errors so more receiver points can be added later without a scoring rewrite.</p>
     </div>
 
     <div class="mc b">
@@ -902,7 +936,7 @@
         <msub><mi>TL</mi><mtext>mdl</mtext></msub><mo>(</mo><mi>R</mi><mo>)</mo><mo>−</mo>
         <msub><mi>TL</mi><mtext>ref</mtext></msub><mo>(</mo><mi>R</mi><mo>)</mo><mo>|</mo></mrow>
       </math></div>
-      <p class="mc-desc">Absolute deviation of the model's receiver TL from BELLHOP3D's. Isolates accuracy at the target point, independent of the rest of the field.</p>
+      <p class="mc-desc">Absolute deviation of the model's receiver TL from BELLHOP3D's, median-clipped at 25 dB across the (currently single-element) receiver-error array. 25% of Field Fidelity.</p>
     </div>
 
     <div class="mc c">
@@ -915,7 +949,7 @@
         <mi>TL</mi><mo>(</mo><mi>S</mi><mo>→</mo><mi>R</mi><mo>)</mo><mo>−</mo>
         <mi>TL</mi><mo>(</mo><mi>R</mi><mo>→</mo><mi>S</mi><mo>)</mo><mo>|</mo></mrow>
       </math></div>
-      <p class="mc-desc">In a reciprocal medium, source→receiver and receiver→source loss must match. This residual is a physics self-consistency check that should sit near 0 dB.</p>
+      <p class="mc-desc">In a reciprocal medium, source→receiver and receiver→source loss must match. Feeds the Validation gate (must be ≤ 3 dB, or absent for Provisional) rather than a score weight.</p>
     </div>
 
     <div class="mc c">
@@ -928,7 +962,20 @@
         <msub><mi>TL</mi><mrow><mn>2</mn><mi>n</mi></mrow></msub><mo>(</mo><mi>R</mi><mo>)</mo><mo>−</mo>
         <msub><mi>TL</mi><mi>n</mi></msub><mo>(</mo><mi>R</mi><mo>)</mo><mo>|</mo></mrow>
       </math></div>
-      <p class="mc-desc">How much the receiver TL shifts when the ray fan is refined (count <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>n</mi><mo>→</mo><mn>2</mn><mi>n</mi></math>). A small value means the solution has converged, not an artifact of under-sampling.</p>
+      <p class="mc-desc">How much the receiver TL shifts when the ray fan is refined (count <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>n</mi><mo>→</mo><mn>2</mn><mi>n</mi></math>). Feeds the Validation gate (must be ≤ 5 dB, or absent for Provisional) rather than a score weight.</p>
+    </div>
+
+    <div class="mc o">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="1.5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M8.5 15.5a5 5 0 0 1 0-7"/><path d="M18.5 5.5a10 10 0 0 1 0 13"/><path d="M5.5 18.5a10 10 0 0 1 0-13"/></svg></span>
+        <span class="mc-t"><b>Coverage Fidelity</b><span>shadow-mask accuracy · 0–100</span></span>
+        <span class="mc-badge">headline</span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mrow><msub><mi>E</mi><mtext>coverage</mtext></msub><mo>=</mo><mn>0.5</mn><mo>(</mo>
+        <mtext>false-shadow</mtext><mo>+</mo><mtext>false-light</mtext><mo>)</mo></mrow>
+      </math></div>
+      <p class="mc-desc">100×(1 − clamp(E<sub>coverage</sub>, 0, 1)). Higher wins. false-shadow = fraction of BELLHOP-lit cells the model marks shadow; false-light = fraction of BELLHOP-shadow cells the model marks lit — a balanced average, so an unbalanced lit/shadow split can't dilute either failure mode.</p>
     </div>
 
     <div class="mc o">
@@ -941,173 +988,42 @@
           <mrow><mo>|</mo><mo>{</mo><mi>i</mi><mo>:</mo><msub><mi>TL</mi><mi>i</mi></msub><mo>&lt;</mo><mn>120</mn><mo>}</mo><mo>|</mo></mrow>
           <mi>N</mi></mfrac><mo>×</mo><mn>100</mn></mrow>
       </math></div>
-      <p class="mc-desc">Share of grid cells the model marks as insonified (TL below the 120 dB shadow cutoff). The leader score uses the full mask disagreement too: false shadow over BELLHOP-lit cells and false light over BELLHOP-shadow cells.</p>
-    </div>
-
-    <div class="mc p">
-      <div class="mc-hd">
-        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 8 4 4-4 4"/><path d="M2 12h20"/><path d="m6 8-4 4 4 4"/></svg></span>
-        <span class="mc-t"><b>|Δy| 3D</b><span>out-of-plane · km</span></span>
-      </div>
-      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
-        <mrow><mo>|</mo><mi>Δ</mi><mi>y</mi><mo>|</mo><mo>=</mo>
-        <munder><mi>max</mi><mtext>ray</mtext></munder>
-        <mo>|</mo><msub><mi>y</mi><mtext>ray</mtext></msub><mo>−</mo><msub><mi>y</mi><mn>0</mn></msub><mo>|</mo></mrow>
-      </math></div>
-      <p class="mc-desc">Peak lateral excursion a ray makes out of its launch vertical plane — a genuinely 3D effect from bathymetry. It does not dominate the score; within a 2-point leader tie, the model closest to BELLHOP3D's |Δy| wins.</p>
-    </div>
-
-    <div class="mc d">
-      <div class="mc-hd">
-        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.34 19a10 10 0 1 1 17.32 0"/><path d="m12 12 4-3"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span>
-        <span class="mc-t"><b>FPS</b><span>render rate · fps</span></span>
-      </div>
-      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
-        <mrow><mi>FPS</mi><mo>=</mo><mfrac><msub><mi>N</mi><mtext>frames</mtext></msub><mrow><mi>Δ</mi><mi>t</mi></mrow></mfrac></mrow>
-      </math></div>
-      <p class="mc-desc">The panel's live render throughput — not physics, but a read on whether the dense ~500k-segment ray fan holds an interactive frame rate.</p>
-    </div>
-
-  </div>
-</div>
-
-<div id="physics">
-  <div class="hd"><h3>BELLHOP3D <em>Physics</em></h3>
-    <p class="sub">Governing equations for 3D underwater acoustic ray propagation · scenario parameters</p></div>
-  <div id="physics-cards">
-
-    <div class="mc g">
-      <div class="mc-hd">
-        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12 q3-5 5 0 t5 0 t5 0 t5 0"/></svg></span>
-        <span class="mc-t"><b>Eikonal Equation</b><span>wave-front · ray basis</span></span>
-        <span class="mc-badge">foundation</span>
-      </div>
-      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
-        <msup><mrow><mo stretchy="false">|</mo><mo>∇</mo><mi>τ</mi><mo stretchy="false">|</mo></mrow><mn>2</mn></msup>
-        <mo>=</mo>
-        <mfrac><mn>1</mn><mrow><msup><mi>c</mi><mn>2</mn></msup><mo stretchy="false">(</mo><mi mathvariant="bold">x</mi><mo stretchy="false">)</mo></mrow></mfrac>
-      </math></div>
-      <p class="mc-desc">Foundation of ray acoustics: τ(x) is the travel-time field. Its gradient p = ∇τ is the slowness vector (|p| = 1/c), perpendicular to wavefronts and tangent to rays. Solving the eikonal fully determines all ray paths.</p>
-    </div>
-
-    <div class="mc g">
-      <div class="mc-hd">
-        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>
-        <span class="mc-t"><b>Ray Equations</b><span>Hamiltonian · arc length s</span></span>
-      </div>
-      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
-        <mtable columnalign="right center left" rowspacing="0.7ex">
-          <mtr>
-            <mtd><mfrac><mrow><mi>d</mi><mi mathvariant="bold">x</mi></mrow><mrow><mi>d</mi><mi>s</mi></mrow></mfrac></mtd>
-            <mtd><mo>=</mo></mtd>
-            <mtd><mi>c</mi><mo stretchy="false">(</mo><mi mathvariant="bold">x</mi><mo stretchy="false">)</mo><mo>·</mo><mi mathvariant="bold">p</mi></mtd>
-          </mtr>
-          <mtr>
-            <mtd><mfrac><mrow><mi>d</mi><mi mathvariant="bold">p</mi></mrow><mrow><mi>d</mi><mi>s</mi></mrow></mfrac></mtd>
-            <mtd><mo>=</mo></mtd>
-            <mtd><mo>−</mo><mo>∇</mo><mrow><mo stretchy="false">(</mo><mfrac><mn>1</mn><mi>c</mi></mfrac><mo stretchy="false">)</mo></mrow></mtd>
-          </mtr>
-        </mtable>
-      </math></div>
-      <p class="mc-desc">Hamilton's equations in 3D. x(s) traces the ray position; p(s) = ∇τ the slowness vector (|p| = 1/c). Integrated forward along arc length s from the source with initial azimuth θ<sub>az</sub> and elevation θ<sub>el</sub> launch angles.</p>
-    </div>
-
-    <div class="mc b">
-      <div class="mc-hd">
-        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="19" x2="21" y2="19" stroke-dasharray="3 3"/><path d="M3 19 L12 7"/><path d="M12 7 L21 19"/></svg></span>
-        <span class="mc-t"><b>Snell's Law</b><span>interface BC · refraction</span></span>
-      </div>
-      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
-        <mfrac><mrow><mi>sin</mi><mo>⁡</mo><msub><mi>θ</mi><mn>1</mn></msub></mrow><msub><mi>c</mi><mn>1</mn></msub></mfrac>
-        <mo>=</mo>
-        <mfrac><mrow><mi>sin</mi><mo>⁡</mo><msub><mi>θ</mi><mn>2</mn></msub></mrow><msub><mi>c</mi><mn>2</mn></msub></mfrac>
-        <mo>=</mo>
-        <mi>const</mi>
-      </math></div>
-      <p class="mc-desc">The tangential component of slowness p is conserved at every interface. In a continuously stratified medium this bends rays toward lower-c regions (Fermat's principle), generating the deep SOFAR channel. In 3D it also causes horizontal (azimuthal) deflection over sloped bathymetry.</p>
-    </div>
-
-    <div class="mc b">
-      <div class="mc-hd">
-        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 L6 21"/><path d="M12 3 L18 21"/><line x1="6" y1="21" x2="18" y2="21"/></svg></span>
-        <span class="mc-t"><b>Geometric Spreading</b><span>amplitude · Jacobian</span></span>
-      </div>
-      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
-        <mi>A</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo>
-        <mo>=</mo>
-        <msub><mi>A</mi><mn>0</mn></msub>
-        <msqrt>
-          <mfrac>
-            <mrow><msub><mi>c</mi><mn>0</mn></msub><msub><mi>J</mi><mn>0</mn></msub></mrow>
-            <mrow><mi>c</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>·</mo><mi>J</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow>
-          </mfrac>
-        </msqrt>
-      </math></div>
-      <p class="mc-desc">Pressure amplitude along the ray via energy conservation in the ray tube. J(s) = |∂(x,y)/∂(q₁,q₂)| is the Jacobian of the ray mapping from launch angles q to spatial position. J → 0 at caustics where amplitude diverges.</p>
-    </div>
-
-    <div class="mc c">
-      <div class="mc-hd">
-        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1.5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M8.5 15.5a5 5 0 0 1 0-7"/></svg></span>
-        <span class="mc-t"><b>Pressure Field</b><span>WKBJ ray solution</span></span>
-      </div>
-      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
-        <mi>p</mi><mo stretchy="false">(</mo><mi mathvariant="bold">x</mi><mo>,</mo><mi>ω</mi><mo stretchy="false">)</mo>
-        <mo>=</mo>
-        <munder><mo>∑</mo><mi>k</mi></munder>
-        <msub><mi>A</mi><mi>k</mi></msub><mo stretchy="false">(</mo><mi mathvariant="bold">x</mi><mo stretchy="false">)</mo>
-        <mo>·</mo>
-        <msup><mi mathvariant="normal">e</mi><mrow><mi>i</mi><mi>ω</mi><msub><mi>τ</mi><mi>k</mi></msub><mo stretchy="false">(</mo><mi mathvariant="bold">x</mi><mo stretchy="false">)</mo></mrow></msup>
-      </math></div>
-      <p class="mc-desc">WKBJ approximation to the Helmholtz equation. Each ray arrival k contributes an amplitude A_k and phase ωτ_k; arrivals are summed coherently. BELLHOP's Gaussian-beam variant replaces the Dirac-delta spreading with a finite-width Gaussian to avoid caustic singularities.</p>
+      <p class="mc-desc">Share of grid cells the model marks as insonified (TL below the 120 dB shadow cutoff). A raw diagnostic, not a scored quantity — Coverage Fidelity uses the directional false-shadow/false-light rates above.</p>
     </div>
 
     <div class="mc o">
       <div class="mc-hd">
-        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 17 7 7 11 13 15 8 21 17"/></svg></span>
-        <span class="mc-t"><b>Sound Speed Profile</b><span>c(z) · m s⁻¹ · scenario</span></span>
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h16" stroke-dasharray="2 3"/><circle cx="7" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="17" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span>
+        <span class="mc-t"><b>Boundary Δ</b><span>shadow-boundary distance · km</span></span>
       </div>
-      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
-        <mi>c</mi><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo><mo>=</mo>
-        <mo>{</mo>
-        <mtable columnalign="left left" rowspacing="0.5ex">
-          <mtr>
-            <mtd><mn>1520</mn><mo>−</mo><mn>0.10</mn><mo>·</mo><mi>z</mi></mtd>
-            <mtd><mi>z</mi><mo>≤</mo><mn>200</mn><mtext> m</mtext></mtd>
-          </mtr>
-          <mtr>
-            <mtd><mn>1500</mn><mo>+</mo><mn>0.018</mn><mo stretchy="false">(</mo><mi>z</mi><mo>−</mo><mn>200</mn><mo stretchy="false">)</mo></mtd>
-            <mtd><mi>z</mi><mo>&gt;</mo><mn>200</mn><mtext> m</mtext></mtd>
-          </mtr>
-        </mtable>
-      </math></div>
-      <p class="mc-desc">Bi-linear profile: −10 m s⁻¹ km⁻¹ negative gradient in the mixed layer (0–200 m) producing a near-surface shadow zone; then +18 m s⁻¹ km⁻¹ positive gradient below, forming a deep SOFAR (Sound Fixing and Ranging) channel axis.</p>
+      <p class="mc-desc">Average symmetric distance between the model's and BELLHOP3D's shadow/lit boundary voxels, from a 6-connected grid-distance search (not exact Euclidean — an approximate, grid-quantized diagnostic). Reported when the full canonical grid is available; prefer this over a raw Hausdorff distance, which one outlier voxel can dominate.</p>
     </div>
 
-    <div class="mc p">
+    <div class="mc g">
       <div class="mc-hd">
-        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 20 Q7 6 10 14 Q13 20 17 9 L20 20 Z" fill="none"/></svg></span>
-        <span class="mc-t"><b>Bathymetry</b><span>D(x,y) · m · scenario</span></span>
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 1 8 8" opacity=".4"/><path d="M4 12a8 8 0 0 1 8-8"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg></span>
+        <span class="mc-t"><b>Composite</b><span>secondary blend · points</span></span>
+        <span class="mc-badge">secondary</span>
       </div>
       <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
-        <mtable columnalign="left" rowspacing="0.4ex">
-          <mtr><mtd>
-            <mi>D</mi><mo>=</mo><mn>2500</mn>
-            <mo>−</mo>
-            <munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>1</mn></mrow><mn>2</mn></munderover>
-            <msub><mi>H</mi><mi>k</mi></msub>
-            <mo>exp</mo><mo stretchy="false">(</mo><mo>−</mo><msubsup><mi>r</mi><mi>k</mi><mn>2</mn></msubsup><mo stretchy="false">)</mo>
-          </mtd></mtr>
-          <mtr><mtd>
-            <msubsup><mi>r</mi><mi>k</mi><mn>2</mn></msubsup>
-            <mo>=</mo>
-            <msup><mrow><mo stretchy="false">(</mo><mfrac><mrow><mi>x</mi><mo>−</mo><msub><mi>x</mi><mi>k</mi></msub></mrow><msub><mi>a</mi><mi>k</mi></msub></mfrac><mo stretchy="false">)</mo></mrow><mn>2</mn></msup>
-            <mo>+</mo>
-            <msup><mrow><mo stretchy="false">(</mo><mfrac><mrow><mi>y</mi><mo>−</mo><msub><mi>y</mi><mi>k</mi></msub></mrow><msub><mi>b</mi><mi>k</mi></msub></mfrac><mo stretchy="false">)</mo></mrow><mn>2</mn></msup>
-          </mtd></mtr>
-        </mtable>
+        <mrow><msub><mi>E</mi><mtext>total</mtext></msub><mo>=</mo><mn>0.60</mn><msub><mi>E</mi><mtext>field</mtext></msub><mo>+</mo>
+        <mn>0.20</mn><msub><mi>E</mi><mtext>coverage</mtext></msub><mo>+</mo>
+        <mn>0.20</mn><msub><mi>E</mi><mtext>geom</mtext></msub></mrow>
       </math></div>
-      <p class="mc-desc">Two Gaussian seamounts on a 2500 m flat basin. k=1: H=1500 m, (x₁,y₁)=(18,12) km, (a,b)=(2.5,3.0) km. k=2: H=1900 m, (x₂,y₂)=(34,9) km, (a,b)=(2.0,2.5) km. Sloped flanks generate horizontal refraction — the primary 3D out-of-plane deflection effect in this scenario.</p>
+      <p class="mc-desc">100×(1 − clamp(E<sub>total</sub>, 0, 1)), computed for every canonical model. If Geometry is unavailable for a model, its weight is re-normalized across the remaining dimensions and the result is marked <em>provisional</em> (shown as "· *"). This is a convenience summary, not the scientific result — Field, Coverage, and Geometry each have their own leader.</p>
+    </div>
+
+    <div class="mc d">
+      <div class="mc-hd">
+        <span class="mc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 4H7l6 8-6 8h10"/></svg></span>
+        <span class="mc-t"><b>TL RMSE</b><span>full-field error · dB</span></span>
+      </div>
+      <div class="mc-eq"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+        <msqrt><mrow><mfrac><mn>1</mn><mi>N</mi></mfrac>
+        <munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>N</mi></munderover>
+        <msup><mrow><mo>(</mo><msub><mover><mi>T</mi><mo>^</mo></mover><mi>i</mi></msub><mo>−</mo><msub><mi>T</mi><mi>i</mi></msub><mo>)</mo></mrow><mn>2</mn></msup></mrow></msqrt>
+      </math></div>
+      <p class="mc-desc">Root-mean-square gap between the model's transmission-loss field and the BELLHOP3D reference solver over every cell of the 101×49×31 grid, shadow zones included. A raw diagnostic — Field Fidelity uses the robust, insonified-only Core err instead.</p>
     </div>
 
   </div>
@@ -1138,7 +1054,7 @@
   }
 </script>
 <!-- absolute path so it loads under the vercel rewrite (/ → /harness/index.html); a relative src resolves to /harness.js → 404 -->
-<script src="/harness/scoring.js?v=1"></script>
-<script src="/harness/harness.js?v=10"></script>
+<script src="/harness/scoring.js?v=3"></script>
+<script src="/harness/harness.js?v=13"></script>
 </body>
 </html>

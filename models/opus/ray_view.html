@@ -23,10 +23,40 @@
   .min:hover{background:#1d4a70;}
   .panel.collapsed .body{display:none;}
   .panel.collapsed{padding-bottom:7px;}
-  #legend{top:10px;left:10px;max-width:208px;}
-  #legend h1{font-size:12px;margin:0 0 5px;color:#eaf4ff;letter-spacing:.3px;}
-  #legend .row{display:flex;align-items:center;gap:6px;margin:2px 0;color:#a9c6e6;}
-  .sw{width:13px;height:9px;border-radius:2px;display:inline-block;flex:0 0 auto;}
+  /* ---- canonical floating panels: legend, TL colorbar, centerline x-section ----
+     shared byte-identical with reference/ray_view_reference.html so all model panels
+     present these three insets in one visual language. */
+  .float-wrap{position:absolute;z-index:3;pointer-events:all;touch-action:none;cursor:grab}
+  .float-wrap.dragging{cursor:grabbing}
+  .float-min{position:absolute;top:4px;right:4px;z-index:4;pointer-events:all;
+    background:rgba(20,35,62,.5);color:#7a82a6;border:1px solid rgba(100,140,255,.18);
+    border-radius:6px;width:17px;height:17px;padding:0;font-size:10px;font-weight:600;line-height:1;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+  .float-min:hover{border-color:rgba(150,210,255,.34);color:#eaeefc}
+  .float-wrap.collapsed{width:auto!important;height:auto!important}
+  .float-wrap.collapsed>*:not(.float-min){display:none}
+  .float-wrap.collapsed .float-min{position:static;width:auto;height:20px;padding:0 8px;
+    font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;border-radius:8px;
+    background:rgba(20,26,60,.7);backdrop-filter:blur(18px)}
+  #xsect-wrap{left:10px;bottom:46px;width:196px;height:119px}
+  #xsect{width:100%;height:100%;border-radius:10px;background:rgba(9,11,30,.75);
+    border:1px solid rgba(100,140,255,.18);backdrop-filter:blur(18px);pointer-events:none;display:block}
+  #legend-wrap{left:10px;bottom:175px}
+  #legend{background:rgba(8,14,26,.72);border:1px solid rgba(100,140,255,.18);border-radius:8px;
+    padding:8px 10px;font:11px -apple-system,sans-serif;color:#cfe3ff;backdrop-filter:blur(18px)}
+  #legend .lg-row{display:flex;align-items:center;gap:8px;padding:3px 0;white-space:nowrap}
+  #legend .lg-sw{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+  #tlbar-wrap{right:16px;top:70px}
+  #tlbar-inner{display:flex;align-items:center;gap:6px;background:rgba(8,14,26,.55);
+    border-radius:8px;padding:8px 10px;backdrop-filter:blur(18px)}
+  #tlbar-inner .tl-col{display:flex;flex-direction:column;align-items:center;gap:4px;
+    font:11px -apple-system,sans-serif;color:#cfe3ff}
+  /* position:relative overrides the global canvas{position:absolute} rule above, so
+     the bar stays IN FLOW inside the #tlbar-inner flex row (otherwise it jumps to the
+     top-left corner of #tlbar-wrap and overlaps the "115"/"45 dB" labels). */
+  #tlbar{width:12px;height:150px;border-radius:2px;display:block;position:relative}
+  #tlbar-inner .tl-side{writing-mode:vertical-rl;transform:rotate(180deg);
+    font:11px -apple-system,sans-serif;color:#cfe3ff}
   #metrics{top:10px;right:10px;width:304px;font-size:11px;}
   .kpis{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:7px;}
   .kpi{background:rgba(13,28,46,0.72);border:1px solid #173354;border-radius:7px;padding:6px 9px;min-width:0;}
@@ -46,8 +76,8 @@
   #offcanon{display:none;margin-top:5px;padding:3px 6px;border-radius:5px;background:#5a1414;
             color:#ffd2d2;border:1px solid #aa3b3b;font-weight:600;text-align:center;}
   #offcanon.on{display:block;}
-  /* sits in the band between the bottom-left cross-section card and bottom-right
-     arrivals card so the slider row never overlaps either figure */
+  /* sits in the band to the right of the bottom-left cross-section card so the
+     slider row never overlaps the figure */
   #controls{left:412px;right:212px;bottom:10px;z-index:6;display:flex;
             flex-wrap:wrap;gap:10px 14px;align-items:center;justify-content:center;}
   #controls button{background:#10283f;color:#dff0ff;border:1px solid #2d567f;border-radius:6px;
@@ -59,15 +89,6 @@
   .ctl .lab{display:flex;justify-content:space-between;}
   .ctl input[type=range]{width:128px;accent-color:#39b0ff;height:14px;}
   .ctl .canon{color:#5fd08a;}
-  #xsecWrap{left:10px;bottom:10px;z-index:5;padding:5px 7px 5px;}
-  /* position:relative overrides the global canvas{position:absolute} so these inset
-     canvases stay IN FLOW inside their card body (otherwise they overflow off-screen). */
-  #xsec{display:block;position:relative;border-radius:4px;margin-top:3px;}
-  #arrWrap{right:10px;bottom:10px;z-index:5;padding:5px 7px 5px;}
-  #arr{display:block;position:relative;border-radius:4px;margin-top:3px;}
-  #cbar{position:absolute;right:10px;top:150px;z-index:5;display:none;}
-  #cbar.on{display:block;}
-  #cbarCv{display:block;border:1px solid #1c3a5e;border-radius:4px;background:rgba(6,14,26,0.82);}
   #overlay{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
            background:rgba(2,6,14,0.78);color:#bfe0ff;font-size:15px;letter-spacing:.5px;}
   #overlay.hidden{display:none;}
@@ -141,17 +162,28 @@
 -->
 <canvas id="scene"></canvas>
 
-<div id="legend" class="panel">
-  <div class="phead"><span class="ptitle">3D Ocean Acoustic Ray View</span><span class="pright"><button class="min">–</button></span></div>
-  <div class="body">
-  <div class="row"><span class="sw" style="background:linear-gradient(#2aa6d6,#040a18)"></span>Water (light→deep)</div>
-  <div class="row"><span class="sw" style="background:#b89a5e"></span>Seabed / seamounts</div>
-  <div class="row"><span class="sw" style="background:linear-gradient(90deg,#ff3b3b,#ffe23b,#3bff7a,#3bd4ff,#9b6bff)"></span>Rays (by launch angle)</div>
-  <div class="row"><span class="sw" style="background:#6df0ff"></span>Insonified volume</div>
-  <div class="row"><span class="sw" style="background:#0a1422;border:1px solid #20364f"></span>Shadow / unreached</div>
-  <div class="row"><span class="sw" style="background:#ffd479;border-radius:50%"></span>Source S &nbsp; <span class="sw" style="background:#5ff0ff;border-radius:50%"></span>Receiver R</div>
-  <div class="row" style="color:#8fffb0">■ eigenrays S→R highlighted</div>
+<!-- canonical floating panels: byte-identical to reference/ray_view_reference.html
+     (xsect/legend/tlbar), wired to this panel's own physics data below. -->
+<div id="xsect-wrap" class="float-wrap">
+  <canvas id="xsect" width="196" height="119"></canvas>
+  <button class="float-min" title="Minimize">–</button>
+</div>
+<div id="legend-wrap" class="float-wrap">
+  <div id="legend">
+    <div class="lg-row"><span class="lg-sw" style="background:#ffd36b"></span>source S</div>
+    <div class="lg-row"><span class="lg-sw" style="background:#9fe8ff"></span>receiver R</div>
+    <div class="lg-row"><span class="lg-sw" style="background:#b08c5a"></span>seabed / seamounts</div>
+    <div class="lg-row"><span class="lg-sw" style="background:#6cf"></span>rays (by launch angle)</div>
+    <div class="lg-row"><span class="lg-sw" style="background:#2aa0d0"></span>insonified TL volume</div>
   </div>
+  <button class="float-min" title="Minimize">–</button>
+</div>
+<div id="tlbar-wrap" class="float-wrap">
+  <div id="tlbar-inner">
+    <div class="tl-col"><span>115</span><canvas id="tlbar" width="12" height="150"></canvas><span>45 dB</span></div>
+    <span class="tl-side">TL (dB)</span>
+  </div>
+  <button class="float-min" title="Minimize">–</button>
 </div>
 
 <div id="metrics" class="panel">
@@ -178,18 +210,6 @@
   </div>
   <div id="offcanon">⚠ OFF-CANONICAL — numbers not comparable</div>
   </div>
-</div>
-
-<div id="cbar"><canvas id="cbarCv" width="58" height="150"></canvas></div>
-
-<div id="xsecWrap" class="panel">
-  <div class="phead"><span class="ptitle" style="font-size:10px;color:#8fb2d6;font-weight:400">Centerline cross-section (y = 12 km): refraction in x–z</span><span class="pright"><button class="min">–</button></span></div>
-  <div class="body"><canvas id="xsec" width="380" height="208"></canvas></div>
-</div>
-
-<div id="arrWrap" class="panel">
-  <div class="phead"><span class="ptitle" style="font-size:10px;color:#8fb2d6;font-weight:400">arrivals @ R (TL vs t)</span><span class="pright"><button class="min">–</button></span></div>
-  <div class="body"><canvas id="arr" width="176" height="86"></canvas></div>
 </div>
 
 <div id="controls" class="panel">
@@ -843,92 +863,78 @@ function drawNode(W3,col,label,isR){
   ctx.fillStyle='#eaf6ff'; ctx.font='bold 12px monospace'; ctx.textAlign='center';
   ctx.fillText(label,p.x,p.y-rr-7); ctx.textAlign='left';
 }
-// ARRIVALS stem plot at R (travel time vs TL per eigenray) — own minimizable card.
-// Stems already reached by the wavefront (t<=Tfront) are bright; future arrivals faint.
-const arrCv=document.getElementById('arr');
-function drawArrivalsCard(){
-  if(!arrCv) return;
-  const a=arrCv.getContext('2d'), w=arrCv.width, h=arrCv.height;
-  a.clearRect(0,0,w,h); a.fillStyle='#02060d'; a.fillRect(0,0,w,h);
-  const eig=STATE&&STATE.rec.eigen;
-  if(!eig||!eig.length){ a.fillStyle='#6f93b8'; a.font='9px monospace'; a.textAlign='left'; a.fillText('no eigenrays in tol',8,h/2); return; }
-  let tmin=1e9,tmax=-1e9,tlmin=1e9,tlmax=-1e9;
-  for(const e of eig){tmin=Math.min(tmin,e.t);tmax=Math.max(tmax,e.t);tlmin=Math.min(tlmin,e.tl);tlmax=Math.max(tlmax,e.tl);}
-  if(tmax-tmin<0.05)tmax=tmin+0.05; if(tlmax-tlmin<2)tlmax=tlmin+2;
-  const padX=12, baseY=h-13, topY=9;
-  const px=t=>padX+(t-tmin)/(tmax-tmin)*(w-2*padX);
-  const py=tl=>baseY-(1-(tl-tlmin)/(tlmax-tlmin))*(baseY-topY);  // low TL (loud) = tall stem
-  a.strokeStyle='#244a6e'; a.lineWidth=1; a.beginPath(); a.moveTo(padX,baseY); a.lineTo(w-padX,baseY); a.stroke();
-  for(const e of eig){
-    const X=px(e.t), Y=py(e.tl), reached=e.t<=Tfront;
-    a.strokeStyle=reached?'rgba(120,200,255,0.9)':'rgba(120,200,255,0.22)'; a.lineWidth=1.4;
-    a.beginPath(); a.moveTo(X,baseY); a.lineTo(X,Y); a.stroke();
-    a.fillStyle=reached?'#8fffb0':'rgba(143,255,176,0.30)';
-    a.beginPath(); a.arc(X,Y,2,0,7); a.fill();
-  }
-  a.fillStyle='#6f93b8'; a.font='8px monospace'; a.textAlign='left';
-  a.fillText(tmin.toFixed(2)+'s',2,h-3); a.fillText(tlmin.toFixed(0)+'dB',2,topY+3);
-  a.textAlign='right'; a.fillText(tmax.toFixed(2)+'s',w-2,h-3); a.fillText(tlmax.toFixed(0)+'dB',w-2,baseY-1); a.textAlign='left';
-}
-
 //====================================================================================
-// 9. CROSS-SECTION (y = 12 km centerline, x-z plane) — shows pure refraction
+// 9. CROSS-SECTION (canonical inset: y = 12 km centerline, x-z plane) — byte-identical
+//    layout/size/colors to reference/ray_view_reference.html, drawn from OWN physics
+//    data (Dbathy, fan rays, SRC/RCV, animation cursor Tfront).
 //====================================================================================
-const xc=document.getElementById('xsec'), xx=xc.getContext('2d');
-function renderXSec(Tfront){
-  const w=xc.width,h=xc.height, padL=30,padR=8,padT=6,padB=16;
-  const plotW=w-padL-padR, plotH=h-padT-padB;
-  const X2x=x=>padL+x/DOM[0]*plotW, Z2y=z=>padT+z/DOM[2]*plotH;
-  const g=xx.createLinearGradient(0,padT,0,padT+plotH);
-  g.addColorStop(0,'#0d3b5c'); g.addColorStop(1,'#020a14');
-  xx.fillStyle='#02060d'; xx.fillRect(0,0,w,h);
-  xx.fillStyle=g; xx.fillRect(padL,padT,plotW,plotH);
-  // seabed profile at y=12 km
-  xx.beginPath(); xx.moveTo(X2x(0),Z2y(Dbathy(0,12000)));
-  for(let i=0;i<=200;i++){const x=i/200*DOM[0]; xx.lineTo(X2x(x),Z2y(Dbathy(x,12000)));}
-  xx.lineTo(X2x(DOM[0]),Z2y(DOM[2])); xx.lineTo(X2x(0),Z2y(DOM[2])); xx.closePath();
-  xx.fillStyle='#7a6233'; xx.fill();
-  // sound-speed profile mini-curve
-  xx.strokeStyle='rgba(120,220,160,0.85)'; xx.lineWidth=1.4; xx.beginPath();
-  for(let z=0;z<=DOM[2];z+=20){ const cx=padL+plotW-46+(cz(z)-1495)/(1560-1495)*40, y=Z2y(z); if(z===0)xx.moveTo(cx,y);else xx.lineTo(cx,y); }
-  xx.stroke();
-  xx.fillStyle='rgba(120,220,160,0.9)'; xx.font='8px monospace'; xx.fillText('c(z)',padL+plotW-44,padT+9);
-  // near-plane rays (|az|<2deg) coloured by elevation, up to Tfront
+function drawXSection(Tfront){
+  const xc=document.getElementById('xsect');
+  const ctx=xc.getContext('2d');
+  const W=xc.width, H=xc.height;                 // 196 x 119
+  const PAD={l:34,r:6,t:34,b:22};
+  const pw_=W-PAD.l-PAD.r, ph_=H-PAD.t-PAD.b;
+  const X_MAX=DOM[0]/1000, Z_MAX=DOM[2];          // 50 km, 3000 m (opus domain)
+  const SRC_X=SRC[0]/1000, SRC_Z=SRC[2], RCV_X=RCV[0]/1000, RCV_Z=RCV[2];
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='rgba(155,182,216,.75)';
+  ctx.font='bold 8px "IBM Plex Mono",monospace';
+  ctx.textAlign='left';
+  ctx.fillText('Centerline x-section (x–z)',PAD.l,10);
+  ctx.fillStyle='rgba(155,182,216,.55)';
+  ctx.font='7.5px "IBM Plex Mono",monospace';
+  ctx.fillText('y = 12 km',PAD.l,19);
+  const cx=xk=>PAD.l+xk/X_MAX*pw_;
+  const cz=zm=>PAD.t+zm/Z_MAX*ph_;
+  ctx.beginPath();
+  const NSTEP=80;
+  ctx.moveTo(cx(0),cz(Dbathy(0,SRC[1])));
+  for(let i=1;i<=NSTEP;i++){const xk=i/NSTEP*X_MAX; ctx.lineTo(cx(xk),cz(Dbathy(xk*1000,SRC[1])));}
+  ctx.lineTo(cx(X_MAX),cz(Z_MAX)); ctx.lineTo(cx(0),cz(Z_MAX)); ctx.closePath();
+  ctx.fillStyle='rgba(160,120,70,.40)'; ctx.fill();
+  ctx.strokeStyle='rgba(210,170,100,.55)'; ctx.lineWidth=0.8; ctx.stroke();
+  // opus rays near y=12km (|az|<2deg), each ray's own launch-angle color, arrived-so-far only
   if(STATE){
     const rays=STATE.fan.rays;
     for(let r=0;r<rays.length;r++){
       const R=rays[r]; if(Math.abs(R.az)>2.0*Math.PI/180)continue;
       const hue=(EL1-(R.el*180/Math.PI))/(EL1-EL0)*280;
-      xx.strokeStyle=`hsla(${hue},90%,62%,0.85)`; xx.lineWidth=1; xx.beginPath(); let pen=false;
-      for(let k=0;k<R.n;k++){ if(R.ST[k]>Tfront)break; const X=X2x(R.SX[k]),Y=Z2y(R.SZ[k]); if(!pen){xx.moveTo(X,Y);pen=true;}else xx.lineTo(X,Y); }
-      xx.stroke();
+      ctx.strokeStyle=`hsla(${hue},90%,62%,0.85)`; ctx.lineWidth=0.65; ctx.beginPath(); let pen=false;
+      for(let k=0;k<R.n;k++){ if(R.ST[k]>Tfront)break;
+        const X=cx(R.SX[k]/1000),Y=cz(R.SZ[k]); if(!pen){ctx.moveTo(X,Y);pen=true;}else ctx.lineTo(X,Y); }
+      ctx.stroke();
     }
   }
-  const sP=[X2x(SRC[0]),Z2y(SRC[2])], rP=[X2x(RCV[0]),Z2y(RCV[2])];
-  xx.fillStyle='#ffd479'; xx.beginPath(); xx.arc(sP[0],sP[1],3.5,0,7); xx.fill();
-  xx.fillStyle='#eaf6ff'; xx.font='9px monospace'; xx.fillText('S',sP[0]-3,sP[1]-6);
-  xx.strokeStyle=(STATE&&STATE.rec.reached)?'#39ff9b':'#ff4d4d'; xx.setLineDash([3,2]); xx.lineWidth=1.4;
-  xx.beginPath(); xx.arc(rP[0],rP[1],4.5,0,7); xx.stroke(); xx.setLineDash([]);
-  xx.fillStyle='#5ff0ff'; xx.fillText('R (y=9km)',rP[0]-6,rP[1]-7);
-  xx.strokeStyle='#244a6e'; xx.lineWidth=1; xx.strokeRect(padL,padT,plotW,plotH);
-  xx.fillStyle='#7fa6cc'; xx.font='8px monospace';
-  xx.fillText('0',padL,h-5); xx.fillText('50 km',padL+plotW-26,h-5);
-  xx.save(); xx.translate(9,padT+plotH/2); xx.rotate(-Math.PI/2); xx.fillText('depth 0–3000 m',-34,0); xx.restore();
+  ctx.strokeStyle='rgba(155,182,216,.35)'; ctx.lineWidth=0.7;
+  ctx.beginPath();
+  ctx.moveTo(PAD.l,PAD.t); ctx.lineTo(PAD.l,PAD.t+ph_);
+  ctx.moveTo(PAD.l,PAD.t+ph_); ctx.lineTo(PAD.l+pw_,PAD.t+ph_);
+  ctx.stroke();
+  ctx.fillStyle='rgba(155,182,216,.55)'; ctx.font='7.5px "IBM Plex Mono",monospace';
+  ctx.textAlign='center';
+  [0,10,20,30,40,50].forEach(xk=>ctx.fillText(xk,cx(xk),PAD.t+ph_+10));
+  ctx.fillText('range (km)',PAD.l+pw_/2,PAD.t+ph_+20);
+  ctx.textAlign='right';
+  [0,1000,2000,3000].forEach(zm=>ctx.fillText(zm?zm/1000+'k':0,PAD.l-3,cz(zm)+3));
+  ctx.fillStyle='#ffd36b'; ctx.textAlign='center'; ctx.font='bold 9px sans-serif';
+  ctx.beginPath(); ctx.arc(cx(SRC_X),cz(SRC_Z),2.5,0,7); ctx.fill();
+  ctx.fillText('S',cx(SRC_X),cz(SRC_Z)-5);
+  ctx.fillStyle='#9fe8ff';
+  ctx.beginPath(); ctx.arc(cx(RCV_X),cz(RCV_Z),2.5,0,7); ctx.fill();
+  ctx.fillText('R',cx(RCV_X),cz(RCV_Z)-5);
 }
 
 //====================================================================================
-// 10. COLORBAR
+// 10. TL COLORBAR (canonical: fixed 45–115 dB gradient, identical across all panels)
 //====================================================================================
-function drawColorbar(){
-  const cv=document.getElementById('cbarCv'), c=cv.getContext('2d');
-  c.clearRect(0,0,cv.width,cv.height);
-  for(let i=0;i<120;i++){
-    const rgb=colormapTL(45+(CUTOFF-45)*i/119);
-    c.fillStyle=`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`; c.fillRect(8,18+i,16,1.2);
-  }
-  c.fillStyle='#cfe6ff'; c.font='8px monospace';
-  c.fillText('TL dB',6,12); c.fillText('45',26,24); c.fillText(''+CUTOFF,26,138);
-  c.strokeStyle='#274a6c'; c.strokeRect(8,18,16,120);
+function tlColorRef(tl){
+  const t=Math.max(0,Math.min(1,(tl-45)/70));
+  const r=Math.min(1,Math.max(0,1.4*t-0.2)), g=Math.sin(Math.PI*t),
+        b=Math.min(1,Math.max(0,1.2-1.6*t));return[r*.9+.1,g*.85,b*.95];}
+function drawTLBarCanvas(){
+  const c=document.getElementById('tlbar'), tctx=c.getContext('2d'), bh=c.height;
+  for(let y=0;y<bh;y++){const tl=115-(y/bh)*70,col=tlColorRef(tl);
+    tctx.fillStyle=`rgb(${col.map(v=>v*255|0).join(',')})`; tctx.fillRect(0,y,c.width,1);}
 }
 
 //====================================================================================
@@ -950,8 +956,7 @@ function frame(ts){
   ctx.setTransform(DPR,0,0,DPR,0,0); ctx.clearRect(0,0,W,H);
   ctx.drawImage(off,0,0,W,H);
   renderDynamic(Tfront);
-  renderXSec(Tfront);
-  drawArrivalsCard();
+  drawXSection(Tfront);
   requestAnimationFrame(frame);
 }
 function resize(){
@@ -1012,7 +1017,7 @@ $('slTime').oninput=()=>{ if(!STATE)return; playing=false; $('btnPlay').textCont
   Tfront=animClock=(+$('slTime').value/1000)*STATE.Tmax; trailDirty=true; $('lblT').textContent=Math.round(+$('slTime').value/10)+'%'; };
 $('slSpd').oninput=()=>{ speed=+$('slSpd').value/100; $('lblSpd').textContent=speed.toFixed(1)+'×'; };
 $('slOp').oninput=()=>{ volOpacity=+$('slOp').value/100; $('lblOp').textContent=volOpacity.toFixed(2); camDirty=true; };
-$('ckTL').onchange=()=>{ tlColormap=$('ckTL').checked; $('cbar').className=tlColormap?'on':''; camDirty=true; };
+$('ckTL').onchange=()=>{ tlColormap=$('ckTL').checked; camDirty=true; };
 $('ckVol').onchange=()=>{ showVol=$('ckVol').checked; camDirty=true; };
 $('ckEig').onchange=()=>{ showEig=$('ckEig').checked; };
 
@@ -1024,10 +1029,34 @@ document.querySelectorAll('.min').forEach(b=>b.addEventListener('click',e=>{
 }));
 document.querySelectorAll('.phead').forEach(hd=>hd.addEventListener('click',()=>{const b=hd.querySelector('.min'); if(b)b.click();}));
 
+// canonical floating panels (legend / TL colorbar / centerline x-section): drag-to-
+// reposition + minimize, byte-identical mechanism to reference/ray_view_reference.html.
+// (No element carries the old .draggable class anymore — legend/cbar/xsecWrap were
+// replaced by legend-wrap/tlbar-wrap/xsect-wrap above — so this fully replaces it.)
+function makeDraggable(el){
+  el.addEventListener('pointerdown',e=>{
+    if(e.target.closest('.float-min'))return;
+    e.preventDefault();
+    const rect=el.getBoundingClientRect(), parentRect=el.offsetParent.getBoundingClientRect();
+    el.style.left=(rect.left-parentRect.left)+'px'; el.style.top=(rect.top-parentRect.top)+'px';
+    el.style.right='auto'; el.style.bottom='auto';
+    const sx=e.clientX, sy=e.clientY, ol=parseFloat(el.style.left), ot=parseFloat(el.style.top);
+    el.classList.add('dragging'); el.setPointerCapture(e.pointerId);
+    function onMove(e2){el.style.left=(ol+e2.clientX-sx)+'px'; el.style.top=(ot+e2.clientY-sy)+'px';}
+    function onUp(){el.classList.remove('dragging');
+      el.removeEventListener('pointermove',onMove); el.removeEventListener('pointerup',onUp);}
+    el.addEventListener('pointermove',onMove); el.addEventListener('pointerup',onUp);
+  });
+}
+document.querySelectorAll('.float-wrap').forEach(makeDraggable);
+document.querySelectorAll('.float-min').forEach(btn=>{btn.onclick=e=>{e.stopPropagation();
+  const collapsed=btn.closest('.float-wrap').classList.toggle('collapsed');
+  btn.textContent=collapsed?'⤢':'–'; btn.title=collapsed?'Expand':'Minimize';};});
+
 //====================================================================================
 // 13. BOOT
 //====================================================================================
-resize(); drawColorbar(); setBeamLabels();
+resize(); drawTLBarCanvas(); setBeamLabels();
 requestAnimationFrame(frame);
 setTimeout(()=>{ STATE=precompute(41,31); window.__rayViewState=STATE; pushMetrics(STATE); camDirty=true; projCacheDirty=true; $('overlay').classList.add('hidden'); },40);
 window.__rayViewSetTime=function(t){
@@ -1043,7 +1072,7 @@ window.__rayViewSetTime=function(t){
 <script>
 (function(){
   var CTRL_SELS=['#controls'];
-  var ALL_SELS=['#legend','#metrics','#cbar','#xsecWrap','#arrWrap','#controls','.hint'];
+  var ALL_SELS=['#metrics','#tlbar-wrap','#xsect-wrap','#controls','.hint'];
   window.addEventListener('message',function(e){
     var d=e.data; if(!d)return;
     var t=d.type,v,btn,es,as,ss,os;

@@ -4,21 +4,19 @@
 
 <h1 align="center">Underwater Acoustic Ray Bench</h1>
 
-<p align="center"><b>Five LLMs, one physics prompt, one ground truth.</b></p>
+<p align="center"><b>Five LLMs, one physics prompt, one BELLHOP3D reference solver.</b></p>
 <p align="center">Trace the rays. Refract through the profile. Bounce off the seabed. Score against BELLHOP3D.</p>
 
 <p align="center">
-  <img alt="Fugu Ultra" src="https://img.shields.io/badge/%F0%9F%90%A1_FUGU_ULTRA-39ff85?style=for-the-badge&labelColor=14152b">
-  <img alt="Opus 4.8 max" src="https://img.shields.io/badge/%E2%9C%B9_OPUS_4.8_MAX-7b8cff?style=for-the-badge&labelColor=14152b">
-  <img alt="GPT 5.5 Extra High" src="https://img.shields.io/badge/%E2%AC%A2_GPT_5.5_XH-ff8c42?style=for-the-badge&labelColor=14152b">
-  <img alt="Gemini 3.1 Pro High" src="https://img.shields.io/badge/%E2%9C%A6_GEMINI_3.1_PRO-ff4f9a?style=for-the-badge&labelColor=14152b">
-  <img alt="Fable 5 Max" src="https://img.shields.io/badge/%F0%9F%93%96_FABLE_5_MAX-2dd4bf?style=for-the-badge&labelColor=14152b">
+  <img alt="Fugu Ultra" src="https://img.shields.io/badge/FUGU_ULTRA-39ff85?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMGIwZDFmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI%2BPHBhdGggZD0iTTYuNSAxMmMuOTQtMy40NiA0Ljk0LTYgOC41LTYgMy41NiAwIDYuMDYgMi41NCA3IDYtLjk0IDMuNDctMy40NCA2LTcgNnMtNy41Ni0yLjUzLTguNS02WiIvPjxwYXRoIGQ9Ik0xOCAxMnYuNSIvPjxwYXRoIGQ9Ik0xNiAxNy45M2E5Ljc3IDkuNzcgMCAwIDEgMC0xMS44NiIvPjxwYXRoIGQ9Ik03IDEwLjY3QzcgOCA1LjU4IDUuOTcgMi43MyA1LjVjLTEgMS41LTEgNSAuMjMgNi41LTEuMjQgMS41LTEuMjQgNS0uMjMgNi41QzUuNTggMTguMDMgNyAxNiA3IDEzLjMzIi8%2BPHBhdGggZD0iTTEwLjQ2IDcuMjZDMTAuMiA1Ljg4IDkuMTcgNC4yNCA4IDNoNS44YTIgMiAwIDAgMSAxLjk4IDEuNjdsLjIzIDEuNCIvPjxwYXRoIGQ9Im0xNi4wMSAxNy45My0uMjMgMS40QTIgMiAwIDAgMSAxMy44IDIxSDkuNWE1Ljk2IDUuOTYgMCAwIDAgMS40OS0zLjk4Ii8%2BPC9zdmc%2BCg%3D%3D">
+  <img alt="Opus 4.8 max" src="https://img.shields.io/badge/OPUS_4.8_MAX-7b8cff?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzBiMGQxZiI%2BPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iNC41Ii8%2BPHJlY3QgeD0iMTEuMCIgeT0iMSIgd2lkdGg9IjIuMCIgaGVpZ2h0PSI2LjUiIHJ4PSIwLjUiIHRyYW5zZm9ybT0icm90YXRlKDM1MCAxMiAxMikiLz48cmVjdCB4PSIxMS4wIiB5PSIxIiB3aWR0aD0iMi4wIiBoZWlnaHQ9IjYuNSIgcng9IjAuNSIgdHJhbnNmb3JtPSJyb3RhdGUoMjAgMTIgMTIpIi8%2BPHJlY3QgeD0iMTAuNSIgeT0iMSIgd2lkdGg9IjMuMCIgaGVpZ2h0PSI2LjUiIHJ4PSIwLjUiIHRyYW5zZm9ybT0icm90YXRlKDUwIDEyIDEyKSIvPjxyZWN0IHg9IjExLjAiIHk9IjEiIHdpZHRoPSIyLjAiIGhlaWdodD0iNi41IiByeD0iMC41IiB0cmFuc2Zvcm09InJvdGF0ZSg3NSAxMiAxMikiLz48cmVjdCB4PSIxMS4zIiB5PSIxIiB3aWR0aD0iMS40IiBoZWlnaHQ9IjYuNSIgcng9IjAuNSIgdHJhbnNmb3JtPSJyb3RhdGUoMTAwIDEyIDEyKSIvPjxyZWN0IHg9IjEwLjUiIHk9IjEiIHdpZHRoPSIzLjAiIGhlaWdodD0iNi41IiByeD0iMC41IiB0cmFuc2Zvcm09InJvdGF0ZSgxMjggMTIgMTIpIi8%2BPHJlY3QgeD0iMTEuMCIgeT0iMSIgd2lkdGg9IjIuMCIgaGVpZ2h0PSI2LjUiIHJ4PSIwLjUiIHRyYW5zZm9ybT0icm90YXRlKDE1MiAxMiAxMikiLz48cmVjdCB4PSIxMS4wIiB5PSIxIiB3aWR0aD0iMi4wIiBoZWlnaHQ9IjYuNSIgcng9IjAuNSIgdHJhbnNmb3JtPSJyb3RhdGUoMTc1IDEyIDEyKSIvPjxyZWN0IHg9IjExLjAiIHk9IjEiIHdpZHRoPSIyLjAiIGhlaWdodD0iNi41IiByeD0iMC41IiB0cmFuc2Zvcm09InJvdGF0ZSgyMDAgMTIgMTIpIi8%2BPHJlY3QgeD0iMTEuMyIgeT0iMSIgd2lkdGg9IjEuNCIgaGVpZ2h0PSI2LjUiIHJ4PSIwLjUiIHRyYW5zZm9ybT0icm90YXRlKDIyNSAxMiAxMikiLz48cmVjdCB4PSIxMC41IiB5PSIxIiB3aWR0aD0iMy4wIiBoZWlnaHQ9IjYuNSIgcng9IjAuNSIgdHJhbnNmb3JtPSJyb3RhdGUoMjU1IDEyIDEyKSIvPjxyZWN0IHg9IjExLjAiIHk9IjEiIHdpZHRoPSIyLjAiIGhlaWdodD0iNi41IiByeD0iMC41IiB0cmFuc2Zvcm09InJvdGF0ZSgyODIgMTIgMTIpIi8%2BPHJlY3QgeD0iMTAuNSIgeT0iMSIgd2lkdGg9IjMuMCIgaGVpZ2h0PSI2LjUiIHJ4PSIwLjUiIHRyYW5zZm9ybT0icm90YXRlKDMxNiAxMiAxMikiLz48L3N2Zz4K">
+  <img alt="GPT 5.5 Extra High" src="https://img.shields.io/badge/GPT_5.5_XH-ff8c42?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzBiMGQxZiI%2BPHBhdGggZD0iTTIyLjI4MTkgOS44MjExYTUuOTg0NyA1Ljk4NDcgMCAwIDAtLjUxNTctNC45MTA4IDYuMDQ2MiA2LjA0NjIgMCAwIDAtNi41MDk4LTIuOUE2LjA2NTEgNi4wNjUxIDAgMCAwIDQuOTgwNyA0LjE4MThhNS45ODQ3IDUuOTg0NyAwIDAgMC0zLjk5NzcgMi45IDYuMDQ2MiA2LjA0NjIgMCAwIDAgLjc0MjcgNy4wOTY2IDUuOTggNS45OCAwIDAgMCAuNTExIDQuOTEwNyA2LjA1MSA2LjA1MSAwIDAgMCA2LjUxNDYgMi45MDAxQTUuOTg0NyA1Ljk4NDcgMCAwIDAgMTMuMjU5OSAyNGE2LjA1NTcgNi4wNTU3IDAgMCAwIDUuNzcxOC00LjIwNTggNS45ODk0IDUuOTg5NCAwIDAgMCAzLjk5NzctMi45MDAxIDYuMDU1NyA2LjA1NTcgMCAwIDAtLjc0NzUtNy4wNzI5em0tOS4wMjIgMTIuNjA4MWE0LjQ3NTUgNC40NzU1IDAgMCAxLTIuODc2NC0xLjA0MDhsLjE0MTktLjA4MDQgNC43NzgzLTIuNzU4MmEuNzk0OC43OTQ4IDAgMCAwIC4zOTI3LS42ODEzdi02LjczNjlsMi4wMiAxLjE2ODZhLjA3MS4wNzEgMCAwIDEgLjAzOC4wNTJ2NS41ODI2YTQuNTA0IDQuNTA0IDAgMCAxLTQuNDk0NSA0LjQ5NDR6bS05LjY2MDctNC4xMjU0YTQuNDcwOCA0LjQ3MDggMCAwIDEtLjUzNDYtMy4wMTM3bC4xNDIuMDg1MiA0Ljc4MyAyLjc1ODJhLjc3MTIuNzcxMiAwIDAgMCAuNzgwNiAwbDUuODQyOC0zLjM2ODV2Mi4zMzI0YS4wODA0LjA4MDQgMCAwIDEtLjAzMzIuMDYxNUw5Ljc0IDE5Ljk1MDJhNC40OTkyIDQuNDk5MiAwIDAgMS02LjE0MDgtMS42NDY0ek0yLjM0MDggNy44OTU2YTQuNDg1IDQuNDg1IDAgMCAxIDIuMzY1NS0xLjk3MjhWMTEuNmEuNzY2NC43NjY0IDAgMCAwIC4zODc5LjY3NjVsNS44MTQ0IDMuMzU0My0yLjAyMDEgMS4xNjg1YS4wNzU3LjA3NTcgMCAwIDEtLjA3MSAwbC00LjgzMDMtMi43ODY1QTQuNTA0IDQuNTA0IDAgMCAxIDIuMzQwOCA3Ljg3MnptMTYuNTk2MyAzLjg1NThMMTMuMTAzOCA4LjM2NCAxNS4xMTkyIDcuMmEuMDc1Ny4wNzU3IDAgMCAxIC4wNzEgMGw0LjgzMDMgMi43OTEzYTQuNDk0NCA0LjQ5NDQgMCAwIDEtLjY3NjUgOC4xMDQydi01LjY3NzJhLjc5Ljc5IDAgMCAwLS40MDctLjY2N3ptMi4wMTA3LTMuMDIzMWwtLjE0Mi0uMDg1Mi00Ljc3MzUtMi43ODE4YS43NzU5Ljc3NTkgMCAwIDAtLjc4NTQgMEw5LjQwOSA5LjIyOTdWNi44OTc0YS4wNjYyLjA2NjIgMCAwIDEgLjAyODQtLjA2MTVsNC44MzAzLTIuNzg2NmE0LjQ5OTIgNC40OTkyIDAgMCAxIDYuNjgwMiA0LjY2ek04LjMwNjUgMTIuODYzbC0yLjAyLTEuMTYzOGEuMDgwNC4wODA0IDAgMCAxLS4wMzgtLjA1NjdWNi4wNzQyYTQuNDk5MiA0LjQ5OTIgMCAwIDEgNy4zNzU3LTMuNDUzN2wtLjE0Mi4wODA1TDguNzA0IDUuNDU5YS43OTQ4Ljc5NDggMCAwIDAtLjM5MjcuNjgxM3ptMS4wOTc2LTIuMzY1NGwyLjYwMi0xLjQ5OTggMi42MDY5IDEuNDk5OHYyLjk5OTRsLTIuNTk3NCAxLjQ5OTctMi42MDY3LTEuNDk5N1oiLz48L3N2Zz4K">
+  <img alt="Gemini 3.1 Pro High" src="https://img.shields.io/badge/GEMINI_3.1_PRO-ff4f9a?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzBiMGQxZiI%2BPHBhdGggZD0iTTEyIDJDMTIgMiAxMy41IDguNzUgMTcuNSAxMkMxMy41IDE1LjI1IDEyIDIyIDEyIDIyQzEyIDIyIDEwLjUgMTUuMjUgNi41IDEyQzEwLjUgOC43NSAxMiAyIDEyIDJaIi8%2BPHBhdGggZD0iTTIgMTJDMiAxMiA4Ljc1IDEwLjUgMTIgNi41QzE1LjI1IDEwLjUgMjIgMTIgMjIgMTJDMjIgMTIgMTUuMjUgMTMuNSAxMiAxNy41QzguNzUgMTMuNSAyIDEyIDIgMTJaIi8%2BPC9zdmc%2BCg%3D%3D">
+  <img alt="Fable 5 Max" src="https://img.shields.io/badge/FABLE_5_MAX-2dd4bf?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzBiMGQxZiI%2BPHBhdGggZD0ibTQuNzE0NCAxNS45NTU1IDQuNzE3NC0yLjY0NzEuMDc5LS4yMzA3LS4wNzktLjEyNzVoLS4yMzA3bC0uNzg5My0uMDQ4Ni0yLjY5NTYtLjA3MjktMi4zMzc1LS4wOTcxLTIuMjY0Ni0uMTIxNC0uNTcwNy0uMTIxNS0uNTM0My0uNzA0Mi4wNTQ2LS4zNTIyLjQ3OTctLjMyMTguNjg2LjA2MDggMS41MTc5LjEwMzIgMi4yNzY3LjE1NzggMS42NTE0LjA5NzIgMi40NDY4LjI1NWguMzg4NmwuMDU0Ni0uMTU3OS0uMTMzNi0uMDk3MS0uMTAzMi0uMDk3Mkw2Ljk3MyA5LjgzNTZsLTIuNTUtMS42ODc5LTEuMzM1Ni0uOTcxNC0uNzIyNS0uNDkxOC0uMzY0My0uNDYxNC0uMTU3OC0xLjAwNzguNjU1Ny0uNzIyNS44ODAzLjA2MDcuMjI0Ni4wNjA3Ljg5MjUuNjg2IDEuOTA2NCAxLjQ3NTQgMi40ODkzIDEuODMzNi4zNjQzLjMwMzUuMTQ1Ny0uMTAzMi4wMTgyLS4wNzI4LS4xNjQtLjI3MzMtMS4zNTM5LTIuNDQ2Ny0xLjQ0NS0yLjQ4OTMtLjY0MzUtMS4wMzItLjE3LS42MTk0Yy0uMDYwNy0uMjU1LS4xMDMyLS40Njc0LS4xMDMyLS43Mjg1TDYuMjg3LjEzMzUgNi42OTk3IDBsLjk5NTcuMTMzNi40MTkuMzY0Mi42MTkyIDEuNDE0NyAxLjAwMTggMi4yMjgyIDEuNTU0MyAzLjAyOTYuNDU1My44OTg1LjI0MjkuODMxOC4wOTEuMjU1aC4xNTc5di0uMTQ1N2wuMTI3NS0xLjcwNi4yMzY4LTIuMDk0Ny4yMzA3LTIuNjk1Ny4wNzg5LS43NTg5LjM3NjQtLjkxMDcuNzQ2OC0uNDkxOC41ODI4LjI3OTMuNDc5Ny42ODYtLjA2NjguNDQzMy0uMjg1MyAxLjg1MTctLjU1ODYgMi45MDIxLS4zNjQzIDEuOTQyOWguMjEyNWwuMjQyOS0uMjQyOS45ODM1LTEuMzA1MyAxLjY1MTQtMi4wNjQzLjcyODYtLjgxOTYuODUtLjkwNDYuNTQ2NC0uNDMxMWgxLjAzMjFsLjc1OSAxLjEyOTMtLjM0IDEuMTY1Ny0xLjA2MjUgMS4zNDc4LS44ODA0IDEuMTQxNC0xLjI2MjggMS43LS43ODkzIDEuMzYuMDcyOS4xMDkzLjE4ODItLjAxODMgMi44NTM1LS42MDcgMS41NDIxLS4yNzk0IDEuODM5Ni0uMzE1Ny44MzE4LjM4ODYuMDkxLjM5NDYtLjMyNzguODA3NS0xLjk2Ny40ODU3LTIuMzA3Mi40NjE0LTMuNDM2NC44MTM2LS4wNDI1LjAzMDQuMDQ4Ni4wNjA3IDEuNTQ4Mi4xNDU3LjY2MTguMDM2NGgxLjYyMWwzLjAxNzUuMjI0Ny43ODkyLjUyMi40NzM2LjYzNzYtLjA3OS40ODU3LTEuMjE0Mi42MTkzLTEuNjM5My0uMzg4Ni0zLjgyNS0uOTEwNy0xLjMxMTMtLjMyNzloLS4xODIydi4xMDkzbDEuMDkyOSAxLjA2ODYgMi4wMDM1IDEuODA5MiAyLjUwNzUgMi4zMzE0LjEyNzUuNTc2OC0uMzIxOC40NTU0LS4zNC0uMDQ4Ni0yLjIwMzktMS42NTc1LS44NS0uNzQ2OC0xLjkyNDYtMS42MjFoLS4xMjc1di4xN2wuNDQzMi42NDk2IDIuMzQzNiAzLjUyMTQuMTIxNCAxLjA4MDctLjE3LjM1MjEtLjYwNzEuMjEyNS0uNjY3OS0uMTIxNC0xLjM3MjEtMS45MjQ2TDE0LjM4IDE3Ljk1OWwtMS4xNDE0LTEuOTQyOC0uMTM5Ny4wNzktLjY3NCA3LjI1NTItLjMxNTYuMzcwMy0uNzI4Ni4yNzkzLS42MDcxLS40NjE0LS4zMjE4LS43NDY4LjMyMTgtMS40NzUzLjM4ODYtMS45MjQ2LjMxNTctMS41My4yODUzLTEuOTAwNC4xNy0uNjMxNC0uMDEyMS0uMDQyNS0uMTM5Ny4wMTgyLTEuNDMyOCAxLjk2NzItMi4xNzk2IDIuOTQ0Ni0xLjcyNDMgMS44NDU2LS40MTI4LjE2NC0uNzE2NC0uMzcwNC4wNjY3LS42NjE4LjQwMDgtLjU4ODkgMi4zODYtMy4wMzU3IDEuNDM4OS0xLjg4Mi45MjktMS4wODY4LS4wMDYyLS4xNTc5aC0uMDU0NmwtNi4zMzg1IDQuMTE2NC0xLjEyOTMuMTQ1Ny0uNDg1Ny0uNDU1NC4wNjA4LS43NDY3LjIzMDctLjI0MjkgMS45MDY0LTEuMzExNFoiLz48L3N2Zz4%3D">
   <img alt="Vanilla JS" src="https://img.shields.io/badge/VANILLA_JS-14152b?style=for-the-badge&logo=javascript&logoColor=39ff85">
   <img alt="Raw WebGL" src="https://img.shields.io/badge/RAW_WEBGL-14152b?style=for-the-badge">
   <img alt="BELLHOP3D reference" src="https://img.shields.io/badge/%F0%9F%8C%8A_BELLHOP3D_REFERENCE-14152b?style=for-the-badge">
-  <img alt="Blind evaluation" src="https://img.shields.io/badge/BLIND_EVALUATION-14152b?style=for-the-badge">
-  <img alt="Zero dependencies" src="https://img.shields.io/badge/ZERO_DEPENDENCIES-14152b?style=for-the-badge">
-  <a href="https://uwa-ray-bench.vercel.app/"><img alt="Vercel static" src="https://img.shields.io/badge/VERCEL_STATIC-14152b?style=for-the-badge&logo=vercel&logoColor=39ff85"></a>
+  <a href="https://uwa-ray-bench.vercel.app/"><img alt="Vercel" src="https://img.shields.io/badge/uwa--ray--bench.vercel.app-14152b?style=for-the-badge&logo=vercel&logoColor=39ff85"></a>
 </p>
 
 <p align="center">
@@ -48,7 +46,9 @@ seabed, and report where the sound does — and doesn't — reach.
 None of the models saw each other's output, the reference implementation, or the scoring
 code. Each produced one `ray_view.html`, dropped unmodified into this harness as an
 opaque `<iframe>`. A real **BELLHOP3D** run (genuine 3D, not an Nx2D approximation) sits
-alongside them as ground truth.
+alongside them as the reference solver — not "ground truth," and not the sole verdict:
+scoring separates field, coverage, and geometry fidelity behind a validation gate (see
+[Results](#results)).
 
 The harness scores every panel the same way: each one posts its own computed
 transmission-loss (TL) field on an identical 101×49×31 grid, and the harness compares
@@ -57,27 +57,66 @@ however they like; the verdict comes from the numbers they export.
 
 ## Results
 
-At the canonical operating point (41 elevation beams × 31 azimuth beams = 1,271 rays),
-ranked by **core RMSE** — TL error over the insonified region, the primary scoring
-metric per the [benchmark spec](docs/benchmark_spec.md):
+Scoring separates three fidelity questions instead of collapsing them into one
+number, and reports each panel's own numerical self-checks (reciprocity,
+convergence, TL-field integrity) as a `Qualified` / `Provisional` / `Invalid`
+**Validation** status. That status is informational, not a ranking gate — every
+canonical model is eligible to lead any column, with its Validation status shown
+alongside so a strong number can be read in context (an earlier iteration of this
+redesign did gate ranking on `Qualified`; against the current roster that emptied
+the ranking entirely, so it was loosened — see
+[docs/benchmark_spec.md § Scoring note](docs/benchmark_spec.md#scoring-note) for
+the full formulas and that decision's rationale). This section reports the latest
+canonical (41×31) run:
 
-| Rank | Model | Core RMSE vs BELLHOP3D | |
-| :---: | --- | ---: | --- |
-| 🥇 | **GPT 5.5 (Extra High)** | **8.54 dB** | leader |
-| 🥈 | **Fable 5 (Max)** | 10.02 dB | |
-| 🥉 | **Fugu Ultra** | 12.33 dB | |
-| 4 | **Opus 4.8 (max)** | 12.57 dB | |
-| 5 | **Gemini 3.1 Pro (High)** | 23.10 dB | |
+| Rank | Model | Composite | Field | Coverage | Validation |
+| :---: | --- | ---: | ---: | ---: | :---: |
+| 🥇 | **GPT 5.5 (Extra High)** | **69.2** \* | 64.6 | 83.0 | ⚠ Provisional |
+| 🥈 | **Sakana Fugu (Ultra)** | 66.8 \* | 57.4 | 95.0 | ⚠ Provisional |
+| 🥉 | **Fable 5 (Max)** | 64.0 \* | 57.2 | 84.5 | ⚠ Provisional |
+| 4 | **Opus 4.8 (max)** | 56.4 \* | 46.8 | 85.1 | ✕ Invalid |
+| 5 | **Gemini 3.1 Pro (High)** | 35.4 \* | 32.0 | 45.7 | ✕ Invalid |
 
-*Captured from the latest scored run ([`tools/perf_baseline.json`](tools/perf_baseline.json)).
-Core RMSE is one axis of a tiered scorecard — full-field TL RMSE, receiver-point TL(R)
-error, reciprocity residual, convergence delta, insonified coverage, and 3D out-of-plane
-deflection are all tracked separately and never collapsed into one number. Open the
-**Scorecard** tab in the live harness for the complete, per-metric breakdown with
-per-column winners highlighted.*
+*0–100, higher wins. `*` = **provisional composite**: Geometry Fidelity is "not
+yet scored" for every panel today because the reference panel doesn't currently
+emit its own out-of-plane deflection (a known data-contract gap, tracked in
+[`SCORING_REDESIGN_REPORT.md`](SCORING_REDESIGN_REPORT.md)) — Composite's weight
+re-normalizes over Field + Coverage only until that's fixed. Since Geometry
+Fidelity itself has no leader to show, the table below reports **Boundary Δ**
+(shadow-boundary position error vs BELLHOP3D, computed straight from each
+panel's own TL field) in its place — a real, populated diagnostic, not a
+replacement for the Geometry Fidelity axis or its Composite weight. Opus's Invalid
+status is a real finding, not a data glitch: its self-reported reciprocity
+(10.97 dB) and convergence (7.38 dB) both exceed their caps. **Gemini's Invalid
+status is because its canonical TL field genuinely contains NaN values** — the
+old scoring scheme silently absorbed that into a 120 dB shadow value without
+ever surfacing it; this one does. Open the **Scorecard** tab in the live harness
+for the complete per-metric breakdown, including the retained raw diagnostics
+(TL RMSE, TL(R), reciprocity, convergence, insonified%, boundary distance).*
+
+**Per-criterion leaders** — no single model wins every axis:
+
+| Criterion | Leader |
+| --- | --- |
+| Field Fidelity (↑) | **GPT 5.5 (XH)** |
+| Coverage Fidelity (↑) | **Sakana Fugu** |
+| Boundary Δ (↓) | **Sakana Fugu** |
+| Composite (provisional, ↑) | **GPT 5.5 (XH)** |
+| Core err, dB (↓) | **GPT 5.5 (XH)** |
+| TL RMSE, full-field, dB (↓) | **Fable 5 (Max)** |
+| Smoothed err, dB (↓) | **Fable 5 (Max)** |
+| TL(R) err, dB (↓) | **Sakana Fugu** |
+
+*Full values and the rest of the field for each criterion are in the ranking
+table above and the live **Scorecard** tab.*
+
+GPT leads TL-field accuracy and the overall Composite; Fugu leads shadow-mask
+agreement and receiver accuracy; Fable leads the full-field and smoothed
+diagnostics. That's the point of splitting the score: a single blended number
+would have hidden this and just picked one "winner."
 
 <p align="center">
-  <img src="docs/screenshots/cinema.png" alt="Underwater Acoustic Ray Bench — Cinema view: all five model panels and the reference rendered side by side" width="100%">
+  <img src="docs/screenshots/cinema.png" alt="Underwater Acoustic Ray Bench — Overview: all five model panels and the reference rendered side by side" width="100%">
 </p>
 
 ## How the benchmark works
@@ -90,12 +129,8 @@ per-column winners highlighted.*
   no cross-contamination between the infra build and the model outputs — the full rules
   are in [CLAUDE.md](CLAUDE.md).
 - **Physics governing the task** — eikonal equation, Hamiltonian ray equations, Snell's
-  law at interfaces, geometric-spreading TL — is laid out interactively in the harness's
-  **Physics** tab:
-
-  <p align="center">
-    <img src="docs/screenshots/physics.png" alt="Underwater Acoustic Ray Bench — Physics tab: eikonal equation and Hamiltonian ray equations" width="360">
-  </p>
+  law at interfaces, geometric-spreading TL — is laid out in the
+  [benchmark spec](docs/benchmark_spec.md).
 
 ## Architecture
 
@@ -108,10 +143,10 @@ per-column winners highlighted.*
      opaque <iframe>s, each rendering its own vanilla-JS + WebGL scene
 ```
 
-- **Harness** (`harness/`) — the shared chrome: Gallery / Compare / Scorecard / Physics
+- **Harness** (`harness/`) — the shared chrome: Overview / Compare / Scorecard
   tabs, the Simulation Control sidebar, live scoring, and the shared dark-glassmorphism
   design system.
-- **Reference** (`reference/`) — renders the precomputed BELLHOP3D ground truth with the
+- **Reference** (`reference/`) — renders the precomputed BELLHOP3D reference solve with the
   same visual language as the harness; data is precomputed offline per snap-grid combo
   (`reference/data/<elev>x<azim>.bin`) by `reference/bellhop3d/compute_reference.py`.
 - **Models** (`models/<id>/ray_view.html`) — five opaque, untouched model outputs.

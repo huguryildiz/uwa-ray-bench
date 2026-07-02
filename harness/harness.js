@@ -7,7 +7,7 @@
    - synchronized camera (set/get pose via postMessage)
    - synchronized beam-stop (snap-grid, postMessage)
    - per-cell diff overlay (model - BELLHOP3D), centerline slice
-   - scorecard / ranking (weighted leader score per spec)
+   - scorecard / ranking (validation gate + Field/Coverage/Geometry + Composite)
    - analytic cursor readout (depth, D(x,y), c(z)) from focused-panel world pos
  postMessage only; no network. Model iframes are opaque (never read).
 ============================================================================ */
@@ -34,6 +34,7 @@ const bathy=(xk,yk)=> 2500
 const iframes={}, metrics={}, scores={};
 let focusId=null, curStop={elev:41,azim:31};
 let curTab='overview', curCompareModel='fugu';
+let scoreSort={key:'composite',dir:'desc'};
 document.querySelectorAll('iframe[data-id]').forEach(f=>{iframes[f.dataset.id]=f;});
 function winOf(id){return iframes[id]&&iframes[id].contentWindow;}
 
@@ -48,9 +49,8 @@ const mounted=new Set();
 let lru=[];                           // mounted ids, most-recently-touched first
 function touchLRU(id){ lru=[id,...lru.filter(x=>x!==id)]; }
 function activeSetFor(name){
-  if(name==='overview')    return [currentLeader()||curCompareModel]; // one live panel
+  if(name==='overview')    return []; // all panels closed (poster state) on the overview
   if(name==='compare')     return [curCompareModel,'reference'];  // exactly 2 live
-  if(name==='physics')     return [];
   if(MODELS.includes(name))return [name];
   if(name==='reference')   return ['reference'];
   return [];
@@ -91,8 +91,8 @@ function mountForTab(name){
 /* ---- sequential warm-up (WP1): boot panels one at a time to capture each
    panel's ray_metrics + TL field, score against the reference, cache the
    scorecard — so scores no longer require every panel to be alive at once,
-   and the FPS column is a fair solo measurement. Reference goes first (its
-   TL field is needed to score every model) and stays in memory after. ---- */
+   while keeping at most one model panel hot during warm-up. Reference goes
+   first (its TL field is needed to score every model) and stays in memory. ---- */
 let warmToken=0;
 const warmWaiters=new Map();
 async function warmup(){
@@ -254,25 +254,27 @@ function renderScore(){
   const rows=[];
   const refTlR=metrics.reference?.tl_R??null;
   const refInson=metrics.reference?.insonified!=null?metrics.reference.insonified*100:null;
-  // per-column winner detection (canonical panels only)
+  // composite + headline fidelity columns first, then the retained diagnostic metrics
   const COLS=[
-    {key:'leader', dir:'low',     get:id=>scores[id]?.leaderScore},
-    {key:'rmse',    dir:'low',     get:id=>scores[id]?.rmse},
-    {key:'core',    dir:'low',     get:id=>scores[id]?.coreRmse},
-    {key:'mask',    dir:'low',     get:id=>scores[id]?.maskError},
-    {key:'tlR',     dir:'nearest', ref:refTlR, get:id=>metrics[id]?.tl_R},
-    {key:'tlRerr',  dir:'low',     get:id=>scores[id]?.tlRerr},
-    {key:'recip',   dir:'low',     get:id=>metrics[id]?.reciprocity},
-    {key:'conv',    dir:'low',     get:id=>metrics[id]?.conv_tlR},
-    {key:'insonif', dir:'nearest', ref:refInson, get:id=>metrics[id]?.insonified!=null?metrics[id].insonified*100:null},
-    {key:'oop',     dir:'nearest', ref:()=>metrics.reference?.out_of_plane, get:id=>metrics[id]?.out_of_plane},
-    {key:'fps',     dir:'high',    get:id=>metrics[id]?.fps},
+    {key:'composite', label:'Composite',  dir:'high',    get:id=>scores[id]?.composite?.value},
+    {key:'field',     label:'Field',      dir:'high',    get:id=>scores[id]?.fieldFidelity},
+    {key:'coverage',  label:'Coverage',   dir:'high',    get:id=>scores[id]?.coverageFidelity},
+    {key:'rmse',      label:'TL RMSE',    dir:'low',     get:id=>scores[id]?.rmse},
+    {key:'core',      label:'Core err',   dir:'low',     get:id=>scores[id]?.coreRmse},
+    {key:'smooth',    label:'Smoothed err',dir:'low',    get:id=>scores[id]?.smoothedRmse},
+    {key:'tlR',       label:'TL(R)',      dir:'nearest', ref:refTlR, get:id=>metrics[id]?.tl_R},
+    {key:'tlRerr',    label:'TL(R) err',  dir:'low',     get:id=>scores[id]?.tlRerr},
+    {key:'recip',     label:'recip',      dir:'low',     get:id=>metrics[id]?.reciprocity},
+    {key:'conv',      label:'conv ΔTL(R)',dir:'low',     get:id=>metrics[id]?.conv_tlR},
+    {key:'insonif',   label:'insonif%',   dir:'nearest', ref:refInson, get:id=>metrics[id]?.insonified!=null?metrics[id].insonified*100:null},
+    {key:'bound',     label:'bound Δ',    dir:'low',     get:id=>scores[id]?.boundaryDistanceKm},
   ];
+  // per-column winner detection — canonical models only; Validation status is informational and does not gate eligibility
   const winners={};
   for(const col of COLS){
     let wId=null,wV=null;
     for(const id of MODELS){
-      if(scores[id]?.canonical===false)continue;
+      if(!SCORING.eligible(id,scores))continue;
       const v=col.get(id);
       if(v==null||!isFinite(v))continue;
       if(wId===null){wId=id;wV=v;continue;}
@@ -284,39 +286,64 @@ function renderScore(){
   }
   const DI={low:'↓',high:'↑',nearest:'≈'};
   const TITLES={low:'lower is better',high:'higher is better',nearest:'nearest to reference'};
-  const HLBLS=['Leader','TL RMSE','core RMSE','Mask err','TL(R)','TL(R) err','recip','conv ΔTL(R)','insonif%','|Δy| 3D','FPS'];
-  const leaderId=currentLeader();
   rows.push(`<tr><th>panel</th>`+
-    COLS.map((c,i)=>`<th title="${TITLES[c.dir]}">${HLBLS[i]}`+
-      ` <span style="opacity:.4;font-size:9px;font-weight:400">${DI[c.dir]}</span></th>`).join('')+`</tr>`);
+    COLS.map(c=>{
+      const active=scoreSort.key===c.key;
+      const next=active&&scoreSort.dir==='asc'?'desc':'asc';
+      const ind=active?(scoreSort.dir==='asc'?'▲':'▼'):'↕';
+      return `<th${c.key==='composite'?' class="col-composite"':''} title="${TITLES[c.dir]} · click to sort ${next==='asc'?'ascending':'descending'}">`+
+        `<button type="button" class="score-sort${active?' active':''}" data-score-sort="${c.key}" `+
+        `aria-label="Sort ${c.label} ${next==='asc'?'ascending':'descending'}">${c.label}`+
+        ` <span class="score-dir">${DI[c.dir]}</span><span class="score-ind">${ind}</span></button></th>`;
+    }).join('')+`</tr>`);
   function wcell(key,id,content){
-    if(winners[key]!==id)return`<td>${content}</td>`;
+    if(winners[key]!==id)return`<td${key==='composite'?' class="col-composite"':''}>${content}</td>`;
     const clr=MODEL_CLRS[id];
     return`<td style="color:${clr};text-shadow:0 0 10px ${clr}55;background:${clr}1a;border-radius:5px;font-weight:600">${content}</td>`;
   }
-  PANELS.forEach(p=>{
+  function cellHTML(col,id){
+    const s=scores[id], m=metrics[id];
+    switch(col.key){
+      case'field':return s&&s.fieldFidelity!=null?fmt(s.fieldFidelity,1):'—';
+      case'coverage':return s&&s.coverageFidelity!=null?fmt(s.coverageFidelity,1):'—';
+      case'composite':return s&&s.composite&&s.composite.value!=null
+        ?fmt(s.composite.value,1)+(s.composite.provisional?' *':''):'—';
+      case'rmse':return s?fmt(s.rmse):'—';
+      case'core':return s?fmt(s.coreRmse):'—';
+      case'smooth':return s&&s.smoothedRmse!=null?fmt(s.smoothedRmse):'—';
+      case'tlR':return fmt(m&&m.tl_R,1);
+      case'tlRerr':return s&&s.tlRerr!=null?fmt(s.tlRerr,1):'—';
+      case'recip':return m&&m.reciprocity!=null?fmt(m.reciprocity,1):'—';
+      case'conv':return m&&m.conv_tlR!=null?fmt(m.conv_tlR,1):'—';
+      case'insonif':return m&&m.insonified!=null?fmt(m.insonified*100,1):'—';
+      case'bound':return s&&s.boundaryDistanceKm!=null?fmt(s.boundaryDistanceKm,2)+'km':'—';
+      default:return'—';
+    }
+  }
+  const rowDefs=PANELS.map((p,i)=>({
+    p, i,
+    fixed:p.id==='reference',
+    values:Object.fromEntries(COLS.map(c=>[c.key,c.get(p.id)])),
+  }));
+  const ordered=scoreSort.key?SCORING.sortScorecardRows(rowDefs,scoreSort.key,scoreSort.dir):rowDefs;
+  const leaderId=SCORING.compositeLeader(MODELS,scores);
+  ordered.forEach(({p})=>{
     const m=metrics[p.id],s=scores[p.id];
     if(p.id==='reference'){
-      if(!m){rows.push(`<tr class="refrow"><td>${p.name} (ref)</td><td colspan="11" style="text-align:left;color:#65809f">loading…</td></tr>`);return;}
-      rows.push(`<tr class="refrow"><td>${p.name} (ref)</td><td>0.0</td><td>0.00</td><td>0.00</td><td>0%</td>`+
-        `<td>${fmt(m.tl_R,1)}</td><td>0.00</td><td>0.00</td><td>—</td>`+
-        `<td>${m.insonified!=null?fmt(m.insonified*100,1):'—'}</td><td>ground truth</td>`+
-        `<td>${m.fps!=null?fmt(m.fps,0):'—'}</td></tr>`);
+      if(!m){rows.push(`<tr class="refrow"><td>${p.name} (ref)</td><td colspan="${COLS.length}" style="text-align:left;color:#65809f">loading…</td></tr>`);return;}
+      rows.push(`<tr class="refrow"><td>${p.name} (ref)</td>`+
+        `<td class="col-composite">100.0</td>`+
+        `<td>100.0</td><td>100.0</td>`+
+        `<td>0.00</td><td>0.00</td><td>0.00</td>`+
+        `<td>${fmt(m.tl_R,1)}</td><td>0.00</td>`+
+        `<td>0.00</td><td>0.00</td>`+
+        `<td>${m.insonified!=null?fmt(m.insonified*100,1):'—'}</td>`+
+        `<td>0.00km</td></tr>`);
       return;
     }
-    if(!m){rows.push(`<tr><td>${p.name}</td><td colspan="11" style="text-align:left;color:#65809f">no panel / no metrics yet</td></tr>`);return;}
+    if(!m){rows.push(`<tr><td>${p.name}</td><td colspan="${COLS.length}" style="text-align:left;color:#65809f">no panel / no metrics yet</td></tr>`);return;}
     rows.push(`<tr${p.id===leaderId?' class="leader"':''}><td>${p.name}${m.canonical===false?' <span class="pill-off">OFF-CANON</span>':''}</td>`+
-      wcell('leader',p.id,s&&s.leaderScore!=null?fmt(s.leaderScore,1):'—')+
-      wcell('rmse',p.id,s?fmt(s.rmse):'—')+
-      wcell('core',p.id,s?fmt(s.coreRmse):'—')+
-      wcell('mask',p.id,s&&s.maskError!=null?fmt(s.maskError*100,1)+'%':'—')+
-      wcell('tlR',p.id,fmt(m.tl_R,1))+
-      wcell('tlRerr',p.id,s&&s.tlRerr!=null?fmt(s.tlRerr,1):'—')+
-      wcell('recip',p.id,m.reciprocity!=null?fmt(m.reciprocity,1):'—')+
-      wcell('conv',p.id,m.conv_tlR!=null?fmt(m.conv_tlR,1):'—')+
-      wcell('insonif',p.id,m.insonified!=null?fmt(m.insonified*100,1):'—')+
-      wcell('oop',p.id,m.out_of_plane!=null?fmt(m.out_of_plane/1000,1)+'km':'—')+
-      wcell('fps',p.id,m.fps!=null?fmt(m.fps,0):'—')+
+      COLS.map(c=>wcell(c.key,p.id,cellHTML(c,p.id))).join('')+
       `</tr>`);
   });
   setHTML(document.getElementById('scoretbl'),rows.join(''));
@@ -330,24 +357,36 @@ const CH=64; // bar area height px (matches .bc-chart height:72px)
 function renderBars(){
   const el=document.getElementById('score-bars');
   if(!el)return;
+  const refTlR=metrics.reference?.tl_R??null;
+  const refInson=metrics.reference?.insonified!=null?metrics.reference.insonified*100:null;
   const defs=[
-    {label:'Leader',     unit:'', dp:1, get:id=>scores[id]?.leaderScore},
-    {label:'TL RMSE',    unit:'dB', dp:2, get:id=>scores[id]?.rmse},
-    {label:'Core RMSE',  unit:'dB', dp:2, get:id=>scores[id]?.coreRmse},
-    {label:'Mask err',   unit:'%', dp:1, get:id=>scores[id]?.maskError!=null?scores[id].maskError*100:null},
-    {label:'TL(R) err',  unit:'dB', dp:1, get:id=>scores[id]?.tlRerr},
-    {label:'TL(R)',      unit:'dB', dp:1, get:id=>metrics[id]?.tl_R},
-    {label:'Recip',      unit:'dB', dp:1, get:id=>metrics[id]?.reciprocity},
-    {label:'Conv ΔTL(R)',unit:'dB', dp:1, get:id=>metrics[id]?.conv_tlR},
-    {label:'Insonif%',   unit:'%',  dp:1, get:id=>metrics[id]?.insonified!=null?metrics[id].insonified*100:null},
-    {label:'|Δy| 3D',   unit:'km', dp:1, get:id=>metrics[id]?.out_of_plane!=null?metrics[id].out_of_plane/1000:null},
-    {label:'FPS',        unit:'',   dp:0, get:id=>metrics[id]?.fps!=null?+metrics[id].fps:null},
+    {label:'Field',      unit:'',  dp:1, dir:'high',    get:id=>scores[id]?.fieldFidelity},
+    {label:'Coverage',   unit:'',  dp:1, dir:'high',    get:id=>scores[id]?.coverageFidelity},
+    {label:'Composite',  unit:'',  dp:1, dir:'high',    get:id=>scores[id]?.composite?.value},
+    {label:'TL RMSE',    unit:'dB', dp:2, dir:'low',    get:id=>scores[id]?.rmse},
+    {label:'Core err',   unit:'dB', dp:2, dir:'low',    get:id=>scores[id]?.coreRmse},
+    {label:'Smoothed err',unit:'dB',dp:2, dir:'low',    get:id=>scores[id]?.smoothedRmse},
+    {label:'TL(R) err',  unit:'dB', dp:1, dir:'low',    get:id=>scores[id]?.tlRerr},
+    {label:'TL(R)',      unit:'dB', dp:1, dir:'nearest', ref:refTlR, get:id=>metrics[id]?.tl_R},
+    {label:'Recip',      unit:'dB', dp:1, dir:'low',    get:id=>metrics[id]?.reciprocity},
+    {label:'Conv ΔTL(R)',unit:'dB', dp:1, dir:'low',    get:id=>metrics[id]?.conv_tlR},
+    {label:'Insonif%',   unit:'%',  dp:1, dir:'nearest', ref:refInson, get:id=>metrics[id]?.insonified!=null?metrics[id].insonified*100:null},
+    {label:'Boundary Δ', unit:'km', dp:2, dir:'low',    get:id=>scores[id]?.boundaryDistanceKm},
   ];
   let out='';
   for(const d of defs){
-    const vals=MODELS.map(id=>({id,v:d.get(id)}));
+    let vals=MODELS.map(id=>({id,v:d.get(id)}));
+    vals.sort((a,b)=>{
+      const af=a.v!=null&&isFinite(a.v), bf=b.v!=null&&isFinite(b.v);
+      if(af!==bf)return af?-1:1;
+      if(!af)return 0;
+      const ar=d.dir==='nearest'?Math.abs(a.v-(d.ref??0)):a.v;
+      const br=d.dir==='nearest'?Math.abs(b.v-(d.ref??0)):b.v;
+      return d.dir==='high'?br-ar:ar-br;
+    });
     const nums=vals.map(x=>x.v).filter(v=>v!=null&&isFinite(v));
-    const mx=nums.length?Math.max(...nums):0;
+    const hasRef=d.dir==='nearest'&&d.ref!=null&&isFinite(d.ref);
+    const mx=Math.max(nums.length?Math.max(...nums):0, hasRef?d.ref:0);
     const unitSpan=d.unit?` <small style="font-size:7px;opacity:.5">${d.unit}</small>`:'';
     let cols='';
     for(const {id,v} of vals){
@@ -358,9 +397,15 @@ function renderBars(){
         `<div class="bc-bar-v" style="height:${h}px;background:${clr};box-shadow:0 0 6px ${clr}88"></div>`+
         `</div>`;
     }
-    const xlbls=MODELS.map(id=>`<span class="bc-xl">${MODEL_SHORT[id]}</span>`).join('');
+    /* 'nearest'-sorted cards (Insonif%, TL(R)) rank by distance to the BELLHOP3D
+       reference, not raw value, so bar heights aren't monotonic left-to-right —
+       draw the reference itself as a dashed line so that ordering reads as intentional. */
+    const refLine=hasRef&&mx>0?
+      `<div class="bc-refline" style="bottom:${Math.max(0,Math.min(CH,Math.round(d.ref/mx*CH)))}px">`+
+      `<span class="bc-refline-lbl">ref ${d.ref.toFixed(d.dp)}${d.unit}</span></div>`:'';
+    const xlbls=vals.map(({id})=>`<span class="bc-xl">${MODEL_SHORT[id]}</span>`).join('');
     out+=`<div class="bc-g"><div class="bc-hd">${d.label}${unitSpan}</div>`+
-      `<div class="bc-chart">${cols}</div>`+
+      `<div class="bc-chart">${refLine}${cols}</div>`+
       `<div class="bc-xlbls">${xlbls}</div></div>`;
   }
   setHTML(el,out||'');
@@ -403,7 +448,10 @@ function diverge(t){ // t in [-1,1] -> blue..white..red
 /* ---- camera + stop + playback sync ---- */
 let playing=false, lastPose={yaw:1.0,pitch:0.72,dist:3.3};
 function setStop(elev,azim){curStop={elev:+elev,azim:+azim};
-  document.getElementById('elevsel').value=elev;document.getElementById('azimsel').value=azim;
+  document.getElementById('elevsel').value=ELEV_STOPS.indexOf(+elev);
+  document.getElementById('azimsel').value=AZIM_STOPS.indexOf(+azim);
+  const ev=document.getElementById('elevsel-val');if(ev)ev.textContent=elev;
+  const av=document.getElementById('azimsel-val');if(av)av.textContent=azim;
   broadcast({type:'set_stop',elev:+elev,azim:+azim});}
 
 /* ---- message hub ---- */
@@ -443,14 +491,12 @@ function setReadout(w){
     `c(z)=<b>${c.toFixed(1)}</b>m/s &nbsp; D(x,y)=<b>${D.toFixed(0)}</b>m`;
 }
 
-/* ---- leader = weighted physics score among canonical models. Tie within two
-   points goes to the model whose out-of-plane |Δy| is closest to BELLHOP3D. ---- */
-function coreScore(id){
-  const s=scores[id]; if(!s||s.coreRmse==null||!isFinite(s.coreRmse))return null;
-  return s.leaderScore;
-}
+/* ---- leader = highest Composite Benchmark Score among canonical models
+   (Validation status is informational, not a ranking gate — see scoring.js
+   eligible()); deterministic tie-break: core TL error, then coverage error,
+   then receiver error, then lexical id — see scoring.js compareForTiebreak. ---- */
 function currentLeader(){
-  return SCORING.leaderOf(MODELS,scores,metrics);
+  return SCORING.compositeLeader(MODELS,scores);
 }
 /* WP2: fill each Quick View poster's cached-score line (harness chrome only —
    the poster never mounts the model panel). */
@@ -458,44 +504,53 @@ function updatePosters(){
   MODELS.forEach(id=>{
     const el=document.querySelector(`.cell[data-id="${id}"] .poster-stat`);
     if(!el)return;
-    const v=scores[id]?.coreRmse;
-    const ls=scores[id]?.leaderScore;
-    el.textContent=(ls!=null&&isFinite(ls))?`leader ${ls.toFixed(1)} pts`:'awaiting score';
+    const s=scores[id];
+    const c=s&&s.composite&&s.composite.value;
+    el.textContent=(c!=null&&isFinite(c))?`composite ${c.toFixed(1)} pts`:'awaiting score';
   });
 }
 
 /* ---- hero KPI cards (always-visible compact section) ---- */
 const HERO_H=24;
 const HERO_DEFS=[
-  {key:'rmse',   label:'TL RMSE',    unit:'dB', dp:2, dir:'low', desc:'Full-field TL error',
-   get:id=>scores[id]?.rmse,     ref:()=>0},
-  {key:'core',   label:'Core RMSE',  unit:'dB', dp:2, dir:'low', desc:'Insonified-cell error',
+  {key:'field',   label:'Field',      unit:'', dp:1, dir:'high', desc:'TL field fidelity vs BELLHOP3D',
+   get:id=>scores[id]?.fieldFidelity, ref:()=>100},
+  {key:'coverage',label:'Coverage',   unit:'', dp:1, dir:'high', desc:'Shadow-mask fidelity vs BELLHOP3D',
+   get:id=>scores[id]?.coverageFidelity, ref:()=>100},
+  {key:'boundary',label:'Boundary Δ', unit:'km', dp:2, dir:'low', desc:'Shadow-boundary position error vs BELLHOP3D',
+   get:id=>scores[id]?.boundaryDistanceKm, ref:()=>0},
+  {key:'composite',label:'Composite', unit:'', dp:1, dir:'high', desc:'Composite benchmark score (provisional)',
+   get:id=>scores[id]?.composite?.value, ref:()=>100},
+  {key:'core',   label:'Core err',   unit:'dB', dp:2, dir:'low', desc:'Robust insonified-cell error',
    get:id=>scores[id]?.coreRmse, ref:()=>0},
-  {key:'tlR',    label:'TL(R)',      unit:'dB', dp:1, dir:'nearest', desc:'Loss at receiver R',
-   get:id=>metrics[id]?.tl_R,    ref:()=>metrics.reference?.tl_R??null},
-  {key:'tlRerr', label:'TL(R) err',  unit:'dB', dp:1, dir:'low', desc:'Receiver TL error',
-   get:id=>scores[id]?.tlRerr,   ref:()=>0},
-  {key:'recip',  label:'Recip',      unit:'dB', dp:1, dir:'low', desc:'Reciprocity residual',
-   get:id=>metrics[id]?.reciprocity, ref:()=>0},
-  {key:'conv',   label:'Conv ΔTL(R)',unit:'dB', dp:1, dir:'low', desc:'Grid convergence',
-   get:id=>metrics[id]?.conv_tlR, ref:()=>0},
-  {key:'insonif',label:'Insonif%',   unit:'%',  dp:1, dir:'nearest', desc:'Volume coverage',
-   get:id=>metrics[id]?.insonified!=null?metrics[id].insonified*100:null,
-   ref:()=>metrics.reference?.insonified!=null?metrics.reference.insonified*100:null},
-  {key:'oop',    label:'|Δy| 3D',    unit:'km', dp:1, dir:'nearest', desc:'Out-of-plane vs reference',
-   get:id=>metrics[id]?.out_of_plane!=null?metrics[id].out_of_plane/1000:null,
-   ref:()=>metrics.reference?.out_of_plane!=null?metrics.reference.out_of_plane/1000:null},
+  {key:'rmse',   label:'TL RMSE',    unit:'dB', dp:2, dir:'low', desc:'Full-field TL error vs BELLHOP3D',
+   get:id=>scores[id]?.rmse, ref:()=>0},
+  {key:'smooth', label:'Smoothed err',unit:'dB', dp:2, dir:'low', desc:'3×3×3-smoothed TL field error',
+   get:id=>scores[id]?.smoothedRmse, ref:()=>0},
+  {key:'tlRerr', label:'TL(R) err',  unit:'dB', dp:1, dir:'low', desc:'Loss error at receiver R',
+   get:id=>scores[id]?.tlRerr, ref:()=>0},
 ];
 function renderHero(){
   const el=document.getElementById('hero-bars'); if(!el)return;
+  // allReported: every panel has a score object (data attempted). NOT the same as
+  // having a real result — when the reference reports, recompute() scoreModel()s all
+  // MODELS at once, so every panel gets a truthy-but-empty (composite:null) object
+  // before any model has streamed its live TL field.
+  const allReported=MODELS.every(id=>!!scores[id]);
+  // allScored: every panel has a FINITE composite — i.e. genuinely scored. Gate the
+  // winner banner on this, not allReported, or the first model to report live (fugu,
+  // first in warm-up order) briefly wins the whole field while the others sit at
+  // composite:null, flashing the wrong leader before the real one overtakes it.
+  const allScored=MODELS.every(id=>{const c=scores[id]&&scores[id].composite;
+    return c&&c.value!=null&&isFinite(c.value);});
   let out='';
   for(const d of HERO_DEFS){
     const r=d.ref();
     const vals=MODELS.map(id=>({id,v:d.get(id)}));
-    // leader among canonical panels only (matches the scorecard)
+    // leader among canonical panels only (matches the scorecard; Validation is informational)
     let lid=null,lv=null;
     for(const {id,v} of vals){
-      if(v==null||!isFinite(v)||scores[id]?.canonical===false)continue;
+      if(v==null||!isFinite(v)||!SCORING.eligible(id,scores))continue;
       if(lid===null){lid=id;lv=v;continue;}
       const better=d.dir==='nearest'?Math.abs(v-(r??0))<Math.abs(lv-(r??0)):d.dir==='high'?v>lv:v<lv;
       if(better){lid=id;lv=v;}
@@ -524,12 +579,15 @@ function renderHero(){
       +`<div class="kpi-h"><span class="kpi-nm">${d.label}</span>`
       +`<i class="kpi-dir">${d.dir==='nearest'?'≈':d.dir==='high'?'↑':'↓'}</i></div>`
       +`<div class="kpi-mid"><div class="kpi-figs"><div class="kpi-val">${valTxt}</div>`
-      +`<div class="kpi-sub"><span class="kpi-leader">${lid?MODEL_SHORT[lid]:'awaiting'}</span>${deltaChip}</div></div>`
+      +`<div class="kpi-sub"><span class="kpi-leader">${lid?MODEL_SHORT[lid]:(allReported?'off-canonical':'awaiting')}</span>${deltaChip}</div></div>`
       +`<div class="kpi-bars">${bars}</div></div>`
       +`<div class="kpi-foot">${d.desc}</div></div>`;
   }
   setHTML(el,out);
-  const winId=currentLeader();
+  // only reveal a winner once every canonical model has reported — otherwise the
+  // leader among a partial field (e.g. just the first panel to report) flashes
+  // briefly before the real winner overtakes it as the rest stream in.
+  const winId=allScored?currentLeader():null;
   const nm=document.getElementById('winner-name');
   const badge=document.getElementById('winner-badge');
   const sc=document.getElementById('winner-score');
@@ -537,9 +595,10 @@ function renderHero(){
     nm.textContent=winId?PANELS.find(p=>p.id===winId).name:'—';
     if(winId){nm.style.color=MODEL_CLRS[winId];nm.style.textShadow=`0 0 14px ${MODEL_CLRS[winId]}88`;}
   }
-  if(sc)sc.textContent=winId&&scores[winId]?.leaderScore!=null
-    ? `${fmt(scores[winId].leaderScore,1)} point physics score`
-    : 'awaiting canonical metrics';
+  const winComposite=winId&&scores[winId]&&scores[winId].composite;
+  if(sc)sc.textContent=winComposite&&winComposite.value!=null
+    ? `${fmt(winComposite.value,1)} pt Composite Benchmark Score${winComposite.provisional?' (provisional)':''}`
+    : (allReported?'all panels off-canonical — reset to canonical 41×31':'awaiting canonical metrics');
   if(badge){
     badge.classList.toggle('has-winner',!!winId);
     if(winId){
@@ -551,29 +610,63 @@ function renderHero(){
 }
 
 /* ---- top-bar controls ---- */
+let ELEV_STOPS=[], AZIM_STOPS=[];
 function buildSelectors(stops){
+  ELEV_STOPS=stops.elev; AZIM_STOPS=stops.azim;
   const es=document.getElementById('elevsel'), as=document.getElementById('azimsel');
-  stops.elev.forEach(v=>es.add(new Option(v,v)));
-  stops.azim.forEach(v=>as.add(new Option(v,v)));
-  es.value=41; as.value=31;
-  es.onchange=()=>setStop(es.value,curStop.azim);
-  as.onchange=()=>setStop(curStop.elev,as.value);
+  es.max=ELEV_STOPS.length-1; as.max=AZIM_STOPS.length-1;
+  es.value=ELEV_STOPS.indexOf(41); as.value=AZIM_STOPS.indexOf(31);
+  es.oninput=()=>setStop(ELEV_STOPS[+es.value],curStop.azim);
+  as.oninput=()=>setStop(curStop.elev,AZIM_STOPS[+as.value]);
   MODELS.forEach(id=>document.getElementById('diffmodel').add(new Option(PANELS.find(p=>p.id===id).name,id)));
 }
 function syncPlayUI(){
   const barBtn=document.getElementById('play');
   if(barBtn)barBtn.textContent=playing?'❚❚ Pause all':'▶ Play all';
 }
-document.getElementById('play').onclick=()=>{playing=!playing;syncPlayUI();broadcast({type:playing?'play':'pause'});};
-document.getElementById('reset').onclick=()=>{playing=false;syncPlayUI();
+/* ---- playback-completion tracking: all panels share a 14 s playback at 1×
+   (the reference runs to 17.5 s); when the active run finishes we flip the
+   button back to "▶ Play all" so a single click replays from the top. ---- */
+const MODEL_DUR=14, REF_DUR=17.5;
+let playTimer=null, animElapsed=0, playAnchor=0, playSpeed=1, playDone=false;
+function activeDur(){const a=activeSetFor(curTab); return a.length?(a.includes('reference')?REF_DUR:MODEL_DUR):0;}
+function curSpeed(){const el=document.getElementById('tl-speed'); return el?SPEED_STEPS[+el.value]:1;}
+function clearPlayTimer(){ if(playTimer){clearTimeout(playTimer); playTimer=null;} }
+function pausePlayClock(){ if(playAnchor){animElapsed+=(performance.now()-playAnchor)/1000*playSpeed; playAnchor=0;} clearPlayTimer(); }
+function resetPlayClock(){ clearPlayTimer(); animElapsed=0; playAnchor=0; playDone=false; }
+function schedulePlayEnd(){ clearPlayTimer(); const dur=activeDur(); if(!playing||dur<=0)return;
+  playSpeed=curSpeed(); playAnchor=performance.now();
+  playTimer=setTimeout(()=>{ playing=false; playDone=true; animElapsed=0; playAnchor=0; syncPlayUI(); },
+    Math.max(0,(dur-animElapsed)/playSpeed*1000)); }
+document.getElementById('play').onclick=()=>{
+  if(!playing){                                   // starting playback
+    if(playDone){broadcast({type:'reset'}); resetPlayClock();}   // finished → replay from t=0
+    playing=true; syncPlayUI(); broadcast({type:'play'}); schedulePlayEnd();
+  }else{                                          // pausing
+    playing=false; pausePlayClock(); syncPlayUI(); broadcast({type:'pause'});
+  }
+};
+document.getElementById('reset').onclick=()=>{playing=false;resetPlayClock();syncPlayUI();
   const s=document.getElementById('tl-seek');if(s)s.value=0;
+  const t=document.getElementById('tl-time');if(t)t.textContent='0%';
   broadcast({type:'reset'});};
 document.getElementById('camreset').onclick=()=>{lastPose={yaw:1.0,pitch:0.72,dist:3.3};
   broadcast({type:'set_camera',pose:lastPose});};
 document.getElementById('canon').onclick=()=>setStop(41,31);
 document.getElementById('volchk').onchange=e=>broadcast({type:'set_volume',on:e.target.checked});
-document.getElementById('opac').oninput=e=>broadcast({type:'set_opacity',v:+e.target.value});
+document.getElementById('opac').oninput=e=>{broadcast({type:'set_opacity',v:+e.target.value});
+  const o=document.getElementById('opac-val');if(o)o.textContent=`${Math.round(+e.target.value*100)}%`;};
 document.querySelectorAll('.tab-btn').forEach(btn=>{btn.onclick=()=>switchTab(btn.dataset.tab);});
+document.getElementById('scoretbl').addEventListener('click',e=>{
+  const btn=e.target.closest('button[data-score-sort]');
+  if(!btn)return;
+  const key=btn.dataset.scoreSort;
+  scoreSort={
+    key,
+    dir:scoreSort.key===key&&scoreSort.dir==='asc'?'desc':'asc',
+  };
+  renderScore();
+});
 document.querySelectorAll('.focus-overlay').forEach(ov=>{
   ov.onclick=()=>{
     const fid=ov.dataset.focus;
@@ -583,8 +676,15 @@ document.querySelectorAll('.focus-overlay').forEach(ov=>{
 });
 
 /* ---- sidebar controls ---- */
-document.getElementById('tl-speed').onchange=e=>broadcast({type:'set_speed',speed:+e.target.value});
-document.getElementById('tl-seek').oninput=e=>broadcast({type:'set_time',t:+e.target.value/100});
+const SPEED_STEPS=[0.25,0.5,1,2,4];
+document.getElementById('tl-speed').oninput=e=>{const speed=SPEED_STEPS[+e.target.value];
+  broadcast({type:'set_speed',speed});
+  const v=document.getElementById('tl-speed-val');if(v)v.textContent=`${speed}×`;
+  if(playing){pausePlayClock();schedulePlayEnd();}};   // rescale remaining time to new speed
+document.getElementById('tl-seek').oninput=e=>{broadcast({type:'set_time',t:+e.target.value/100});
+  const t=document.getElementById('tl-time');if(t)t.textContent=`${e.target.value}%`;
+  playing=false;clearPlayTimer();playAnchor=0;playDone=false;   // set_time pauses the panels
+  animElapsed=activeDur()*(+e.target.value/100);syncPlayUI();};
 
 /* ---- compare panel ---- */
 document.getElementById('compare-model').onchange=e=>setCompareModel(e.target.value);

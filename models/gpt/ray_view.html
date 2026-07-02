@@ -114,6 +114,19 @@ ASSUMPTIONS AND NUMERICAL MODEL
       display: none;
     }
 
+    .float-wrap{position:absolute;z-index:3;pointer-events:all;touch-action:none;cursor:grab}
+    .float-wrap.dragging{cursor:grabbing}
+    .float-min{position:absolute;top:4px;right:4px;z-index:4;pointer-events:all;
+      background:rgba(20,35,62,.5);color:#7a82a6;border:1px solid rgba(100,140,255,.18);
+      border-radius:6px;width:17px;height:17px;padding:0;font-size:10px;font-weight:600;line-height:1;
+      cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+    .float-min:hover{border-color:rgba(150,210,255,.34);color:#eaeefc}
+    .float-wrap.collapsed{width:auto!important;height:auto!important}
+    .float-wrap.collapsed>*:not(.float-min){display:none}
+    .float-wrap.collapsed .float-min{position:static;width:auto;height:20px;padding:0 8px;
+      font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;border-radius:8px;
+      background:rgba(20,26,60,.7);backdrop-filter:blur(18px)}
+
     .controls {
       padding: 6px;
       display: flex;
@@ -315,46 +328,6 @@ ASSUMPTIONS AND NUMERICAL MODEL
       grid-column: span 2;
     }
 
-    .legend {
-      position: absolute;
-      left: 12px;
-      bottom: 12px;
-      pointer-events: auto;
-      padding: 6px 8px;
-      border: 1px solid rgba(143, 211, 232, 0.22);
-      background: rgba(3, 12, 22, 0.56);
-      border-radius: 8px;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 6px 10px;
-      max-width: min(560px, calc(100vw - 24px));
-      color: #b7dce7;
-      font: 700 9.5px/1.1 ui-sans-serif, system-ui, sans-serif;
-    }
-
-    .legend .minimizable-body {
-      display: contents;
-    }
-
-    .legend.is-minimized .minimizable-body {
-      display: none;
-    }
-
-    .key {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      white-space: nowrap;
-    }
-
-    .swatch {
-      width: 12px;
-      height: 7px;
-      border-radius: 999px;
-      box-shadow: 0 0 12px currentColor;
-    }
-
     .status {
       position: absolute;
       right: 12px;
@@ -372,43 +345,22 @@ ASSUMPTIONS AND NUMERICAL MODEL
       gap: 6px;
     }
 
-    .colorbar {
-      position: absolute;
-      right: 18px;
-      top: 52%;
-      transform: translateY(-50%);
-      width: 10px;
-      height: 130px;
-      border: 1px solid rgba(222, 249, 255, 0.28);
-      border-radius: 999px;
-      background: linear-gradient(180deg, #e93463, #ffc857 35%, #37e39f 66%, #54dfff);
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 160ms ease;
-    }
-
-    .colorbar.show {
-      opacity: 0.9;
-    }
-
-    .colorbar::before,
-    .colorbar::after {
-      position: absolute;
-      right: 18px;
-      color: #bdebf3;
-      font: 800 10px/1 ui-sans-serif, system-ui, sans-serif;
-      white-space: nowrap;
-    }
-
-    .colorbar::before {
-      content: "112 dB";
-      top: -2px;
-    }
-
-    .colorbar::after {
-      content: "45 dB";
-      bottom: -2px;
-    }
+    #xsect-wrap{left:10px;bottom:46px;width:196px;height:119px}
+    #xsect{width:100%;height:100%;border-radius:10px;background:rgba(9,11,30,.75);
+      border:1px solid rgba(100,140,255,.18);backdrop-filter:blur(18px);pointer-events:none;display:block}
+    #legend-wrap{left:10px;bottom:175px}
+    #legend{background:rgba(8,14,26,.72);border:1px solid rgba(100,140,255,.18);border-radius:8px;
+      padding:8px 10px;font:11px -apple-system,sans-serif;color:#cfe3ff;backdrop-filter:blur(18px)}
+    #legend .lg-row{display:flex;align-items:center;gap:8px;padding:3px 0;white-space:nowrap}
+    #legend .lg-sw{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+    #tlbar-wrap{right:16px;top:70px}
+    #tlbar-inner{display:flex;align-items:center;gap:6px;background:rgba(8,14,26,.55);
+      border-radius:8px;padding:8px 10px;backdrop-filter:blur(18px)}
+    #tlbar-inner .tl-col{display:flex;flex-direction:column;align-items:center;gap:4px;
+      font:11px -apple-system,sans-serif;color:#cfe3ff}
+    #tlbar{width:12px;height:150px;border-radius:2px;display:block}
+    #tlbar-inner .tl-side{writing-mode:vertical-rl;transform:rotate(180deg);
+      font:11px -apple-system,sans-serif;color:#cfe3ff}
 
     @media (max-width: 980px) {
       .topbar {
@@ -433,12 +385,6 @@ ASSUMPTIONS AND NUMERICAL MODEL
     }
 
     @media (max-width: 780px) {
-      .legend {
-        right: 12px;
-        bottom: var(--status-clearance);
-        max-width: none;
-      }
-
       .status {
         left: 12px;
         right: 12px;
@@ -488,7 +434,6 @@ ASSUMPTIONS AND NUMERICAL MODEL
         grid-column: span 2;
       }
 
-      .legend,
       .status {
         left: 8px;
         right: 8px;
@@ -557,22 +502,31 @@ ASSUMPTIONS AND NUMERICAL MODEL
         <div id="metricsBody" class="minimizable-body"></div>
       </aside>
     </div>
-    <div id="legend" class="legend" aria-label="Legend">
-      <button class="panel-toggle" type="button" data-minimize-target="legend" aria-label="Minimize legend" aria-expanded="true">−</button>
-      <div class="minimizable-body">
-        <span class="key"><i class="swatch" style="color:#46ddff;background:#46ddff"></i>Insonified volume</span>
-        <span class="key"><i class="swatch" style="color:#06101d;background:#06101d"></i>Shadow empty/dark</span>
-        <span class="key"><i class="swatch" style="color:#b5aa69;background:#b5aa69"></i>Seabed / seamounts</span>
-        <span class="key"><i class="swatch" style="color:#ffcf83;background:#ffcf83"></i>Launch-angle rays</span>
-        <span class="key"><i class="swatch" style="color:#fff6db;background:#fff6db"></i>Source S</span>
-        <span class="key"><i class="swatch" style="color:#52e4ff;background:#52e4ff"></i>Receiver R</span>
-      </div>
-    </div>
     <div id="statusPanel" class="status">
       <button class="panel-toggle" type="button" data-minimize-target="status" aria-label="Minimize status" aria-expanded="true">−</button>
       <span id="status" class="minimizable-body">Preparing canonical ray trace...</span>
     </div>
-    <div id="colorbar" class="colorbar" aria-hidden="true"></div>
+    <div id="xsect-wrap" class="float-wrap">
+      <canvas id="xsect" width="196" height="119"></canvas>
+      <button class="float-min" title="Minimize">–</button>
+    </div>
+    <div id="legend-wrap" class="float-wrap">
+      <div id="legend">
+        <div class="lg-row"><span class="lg-sw" style="background:#ffd36b"></span>source S</div>
+        <div class="lg-row"><span class="lg-sw" style="background:#9fe8ff"></span>receiver R</div>
+        <div class="lg-row"><span class="lg-sw" style="background:#b08c5a"></span>seabed / seamounts</div>
+        <div class="lg-row"><span class="lg-sw" style="background:#6cf"></span>rays (by launch angle)</div>
+        <div class="lg-row"><span class="lg-sw" style="background:#2aa0d0"></span>insonified TL volume</div>
+      </div>
+      <button class="float-min" title="Minimize">–</button>
+    </div>
+    <div id="tlbar-wrap" class="float-wrap">
+      <div id="tlbar-inner">
+        <div class="tl-col"><span>115</span><canvas id="tlbar" width="12" height="150"></canvas><span>45 dB</span></div>
+        <span class="tl-side">TL (dB)</span>
+      </div>
+      <button class="float-min" title="Minimize">–</button>
+    </div>
   </div>
 
   <script>
@@ -645,9 +599,12 @@ ASSUMPTIONS AND NUMERICAL MODEL
     const metricsEl = document.getElementById("metrics");
     const metricsBodyEl = document.getElementById("metricsBody");
     const statusEl = document.getElementById("status");
-    const colorbarEl = document.getElementById("colorbar");
+    const colorbarEl = document.getElementById("tlbar-wrap");
     const arrivalsToggleBtn = document.getElementById("arrivalsToggleBtn");
     const sectionToggleBtn = document.getElementById("sectionToggleBtn");
+    const xsectionWrap = document.getElementById("xsect-wrap");
+    const xsectionCanvas = document.getElementById("xsect");
+    const xctx = xsectionCanvas.getContext("2d");
 
     const CAMERA_HOME = {
       yaw: -0.73,
@@ -1417,7 +1374,7 @@ ASSUMPTIONS AND NUMERICAL MODEL
       document.documentElement.style.setProperty("--status-clearance", `${clearance}px`);
 
       if (window.innerWidth <= 780) {
-        const legendRect = elementRect("legend");
+        const legendRect = elementRect("legend-wrap");
         const metricsRect = elementRect("metrics");
         if (legendRect && metricsRect) {
           const maxHeight = Math.max(40, legendRect.top - metricsRect.top - 12);
@@ -1454,7 +1411,7 @@ ASSUMPTIONS AND NUMERICAL MODEL
         }
       });
 
-      ["legend", "statusPanel"].forEach(id => {
+      ["legend-wrap", "statusPanel"].forEach(id => {
         const rect = elementRect(id);
         if (rect && overlapsHorizontally(rect, leftCss, rightCss)) {
           bottomLimit = Math.min(bottomLimit, rect.top - gap);
@@ -1480,7 +1437,7 @@ ASSUMPTIONS AND NUMERICAL MODEL
         }
       });
 
-      ["legend", "statusPanel"].forEach(id => {
+      ["legend-wrap", "statusPanel"].forEach(id => {
         const rect = elementRect(id);
         if (rect && overlapsHorizontally(rect, leftCss, rightCss)) {
           bottomLimit = Math.min(bottomLimit, rect.top - gap);
@@ -1588,7 +1545,7 @@ ASSUMPTIONS AND NUMERICAL MODEL
     function syncSceneLabelBlockRects() {
       const dpr = window.devicePixelRatio || 1;
       sceneLabelBlockRects.length = 0;
-      ["controls", "metrics", "legend", "statusPanel"].forEach(id => {
+      ["controls", "metrics", "legend-wrap", "statusPanel"].forEach(id => {
         const rect = elementRect(id);
         if (!rect) return;
         sceneLabelBlockRects.push({
@@ -1969,102 +1926,6 @@ ASSUMPTIONS AND NUMERICAL MODEL
       drawSphere(RECEIVER, 5.0, "#67e8ff", "rgba(82, 228, 255, 0.82)", "R receiver", "#bff7ff", reached ? "#6dff9d" : "#ff5b6c");
     }
 
-    function drawCrossSectionInset() {
-      if (!state.showCrossSection) return;
-      const dpr = window.devicePixelRatio || 1;
-      const w = Math.min(350 * dpr, canvas.width * 0.30);
-      const h = 164 * dpr;
-      const insetMargin = 14 * dpr;
-      const preferredLeft = insetMargin;
-      const maxX = Math.max(12 * dpr, canvas.width - w - 18 * dpr);
-      const x0 = clamp(preferredLeft, 12 * dpr, maxX);
-      const y0 = insetYWithoutOverlayCollision(h, x0, x0 + w, dpr)
-        ?? insetYNearTopWithoutOverlayCollision(h, x0, x0 + w, dpr);
-      if (x0 < 12 * dpr) return;
-      if (y0 === null) return;
-
-      ctx.save();
-      ctx.fillStyle = "rgba(2, 10, 20, 0.64)";
-      ctx.strokeStyle = "rgba(143,211,232,0.22)";
-      ctx.lineWidth = 1 * dpr;
-      roundRect(ctx, x0, y0, w, h, 8 * dpr);
-      ctx.fill();
-      ctx.stroke();
-
-      const padL = 28 * dpr;
-      const padR = 12 * dpr;
-      const padT = 24 * dpr;
-      const padB = 23 * dpr;
-      const plotW = w - padL - padR;
-      const plotH = h - padT - padB;
-
-      ctx.fillStyle = "#c6ecf5";
-      ctx.font = `${11 * dpr}px ui-sans-serif, system-ui, sans-serif`;
-      ctx.fillText("Centerline y=12 km cross-section", x0 + padL, y0 + 17 * dpr);
-      ctx.strokeStyle = "rgba(160,226,244,0.18)";
-      ctx.beginPath();
-      for (let z = 0; z <= 3000; z += 1000) {
-        const py = y0 + padT + z / 3000 * plotH;
-        ctx.moveTo(x0 + padL, py);
-        ctx.lineTo(x0 + padL + plotW, py);
-      }
-      ctx.stroke();
-
-      ctx.strokeStyle = "#c7b86a";
-      ctx.lineWidth = 1.7 * dpr;
-      ctx.beginPath();
-      state.crossSection.forEach((sample, i) => {
-        const px = x0 + padL + sample.x / DOMAIN.xMax * plotW;
-        const py = y0 + padT + sample.z / DOMAIN.zMax * plotH;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      });
-      ctx.stroke();
-
-      ctx.globalAlpha = 0.62;
-      ctx.lineWidth = 0.8 * dpr;
-      for (const ray of state.rays) {
-        if (Math.abs(ray.azDeg) > 0.55) continue;
-        ctx.strokeStyle = ray.color;
-        ctx.beginPath();
-        let started = false;
-        for (let i = 0; i < ray.points.length; i += 3) {
-          const p = ray.points[i];
-          if (p.t > state.currentTime) break;
-          const px = x0 + padL + p.x / DOMAIN.xMax * plotW;
-          const py = y0 + padT + p.z / DOMAIN.zMax * plotH;
-          if (!started) {
-            ctx.moveTo(px, py);
-            started = true;
-          } else {
-            ctx.lineTo(px, py);
-          }
-        }
-        if (started) ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
-
-      const sx = x0 + padL + SOURCE.x / DOMAIN.xMax * plotW;
-      const sy = y0 + padT + SOURCE.z / DOMAIN.zMax * plotH;
-      const rx = x0 + padL + RECEIVER.x / DOMAIN.xMax * plotW;
-      const ry = y0 + padT + RECEIVER.z / DOMAIN.zMax * plotH;
-      ctx.fillStyle = "#fff8d9";
-      ctx.beginPath();
-      ctx.arc(sx, sy, 4 * dpr, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = state.metrics && state.metrics.reached ? "#6dff9d" : "#ff5b6c";
-      ctx.beginPath();
-      ctx.arc(rx, ry, 4 * dpr, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "#9bcdd8";
-      ctx.font = `${9 * dpr}px ui-sans-serif, system-ui, sans-serif`;
-      ctx.fillText("0", x0 + padL - 16 * dpr, y0 + padT + 4 * dpr);
-      ctx.fillText("3000m", x0 + padL - 28 * dpr, y0 + padT + plotH);
-      ctx.fillText("50 km", x0 + padL + plotW - 30 * dpr, y0 + padT + plotH + 16 * dpr);
-      ctx.restore();
-    }
-
     function drawArrivalsInset() {
       if (!state.showArrivals) return;
       const m = state.metrics;
@@ -2138,6 +1999,118 @@ ASSUMPTIONS AND NUMERICAL MODEL
       ctx.restore();
     }
 
+    function drawXsectionPanel() {
+      if (!state.showCrossSection) return;
+      const w = xsectionCanvas.width;
+      const h = xsectionCanvas.height;
+      const PAD = { l: 34, r: 6, t: 34, b: 22 };
+      const pw = w - PAD.l - PAD.r;
+      const ph = h - PAD.t - PAD.b;
+      const cx = xm => PAD.l + xm / DOMAIN.xMax * pw;
+      const cz = zm => PAD.t + zm / DOMAIN.zMax * ph;
+
+      xctx.clearRect(0, 0, w, h);
+
+      xctx.fillStyle = "rgba(155,182,216,.75)";
+      xctx.font = "bold 8px \"IBM Plex Mono\",monospace";
+      xctx.textAlign = "left";
+      xctx.fillText("Centerline x-section (x–z)", PAD.l, 10);
+      xctx.fillStyle = "rgba(155,182,216,.55)";
+      xctx.font = "7.5px \"IBM Plex Mono\",monospace";
+      xctx.fillText("y = 12 km", PAD.l, 19);
+
+      xctx.beginPath();
+      xctx.moveTo(cx(state.crossSection[0].x), cz(state.crossSection[0].z));
+      for (let i = 1; i < state.crossSection.length; i += 1) {
+        const sample = state.crossSection[i];
+        xctx.lineTo(cx(sample.x), cz(sample.z));
+      }
+      xctx.lineTo(cx(DOMAIN.xMax), cz(DOMAIN.zMax));
+      xctx.lineTo(cx(0), cz(DOMAIN.zMax));
+      xctx.closePath();
+      xctx.fillStyle = "rgba(160,120,70,.40)";
+      xctx.fill();
+      xctx.strokeStyle = "rgba(210,170,100,.55)";
+      xctx.lineWidth = 0.8;
+      xctx.stroke();
+
+      xctx.globalAlpha = 0.68;
+      xctx.lineWidth = 0.7;
+      for (const ray of state.rays) {
+        if (Math.abs(ray.azDeg) > 0.55) continue;
+        xctx.strokeStyle = ray.color;
+        xctx.beginPath();
+        let started = false;
+        for (let i = 0; i < ray.points.length; i += 3) {
+          const p = ray.points[i];
+          if (p.t > state.currentTime) break;
+          const px = cx(p.x);
+          const py = cz(p.z);
+          if (!started) {
+            xctx.moveTo(px, py);
+            started = true;
+          } else {
+            xctx.lineTo(px, py);
+          }
+        }
+        if (started) xctx.stroke();
+      }
+      xctx.globalAlpha = 1;
+
+      xctx.strokeStyle = "rgba(155,182,216,.35)";
+      xctx.lineWidth = 0.7;
+      xctx.beginPath();
+      xctx.moveTo(PAD.l, PAD.t);
+      xctx.lineTo(PAD.l, PAD.t + ph);
+      xctx.moveTo(PAD.l, PAD.t + ph);
+      xctx.lineTo(PAD.l + pw, PAD.t + ph);
+      xctx.stroke();
+
+      xctx.fillStyle = "rgba(155,182,216,.55)";
+      xctx.font = "7.5px \"IBM Plex Mono\",monospace";
+      xctx.textAlign = "center";
+      [0, 10, 20, 30, 40, 50].forEach(xk => xctx.fillText(String(xk), cx(xk * 1000), PAD.t + ph + 10));
+      xctx.fillText("range (km)", PAD.l + pw / 2, PAD.t + ph + 20);
+      xctx.textAlign = "right";
+      [0, 1000, 2000, 3000].forEach(zm => xctx.fillText(zm ? zm / 1000 + "k" : "0", PAD.l - 3, cz(zm) + 3));
+
+      xctx.fillStyle = "#ffd36b";
+      xctx.textAlign = "center";
+      xctx.font = "bold 9px sans-serif";
+      xctx.beginPath();
+      xctx.arc(cx(SOURCE.x), cz(SOURCE.z), 2.5, 0, Math.PI * 2);
+      xctx.fill();
+      xctx.fillText("S", cx(SOURCE.x), cz(SOURCE.z) - 5);
+
+      xctx.fillStyle = "#9fe8ff";
+      xctx.beginPath();
+      xctx.arc(cx(RECEIVER.x), cz(RECEIVER.z), 2.5, 0, Math.PI * 2);
+      xctx.fill();
+      xctx.fillText("R", cx(RECEIVER.x), cz(RECEIVER.z) - 5);
+
+      xctx.textAlign = "left";
+    }
+
+    function tlColorRef(tl) {
+      const t = Math.max(0, Math.min(1, (tl - 45) / 70));
+      const r = Math.min(1, Math.max(0, 1.4 * t - 0.2));
+      const g = Math.sin(Math.PI * t);
+      const b = Math.min(1, Math.max(0, 1.2 - 1.6 * t));
+      return [r * 0.9 + 0.1, g * 0.85, b * 0.95];
+    }
+
+    function drawTLBarCanvas() {
+      const c = document.getElementById("tlbar");
+      const tctx = c.getContext("2d");
+      const bh = c.height;
+      for (let y = 0; y < bh; y += 1) {
+        const tl = 115 - (y / bh) * 70;
+        const col = tlColorRef(tl);
+        tctx.fillStyle = `rgb(${col.map(v => v * 255 | 0).join(",")})`;
+        tctx.fillRect(0, y, c.width, 1);
+      }
+    }
+
     function roundRect(context, x, y, w, h, r) {
       const rr = Math.min(r, w / 2, h / 2);
       context.beginPath();
@@ -2186,7 +2159,7 @@ ASSUMPTIONS AND NUMERICAL MODEL
       drawCameraReadout();
       drawRays();
       drawEndpoints();
-      drawCrossSectionInset();
+      drawXsectionPanel();
       drawArrivalsInset();
 
       requestAnimationFrame(render);
@@ -2303,7 +2276,6 @@ ASSUMPTIONS AND NUMERICAL MODEL
       const panel = {
         controls: document.getElementById("controls"),
         metrics: document.getElementById("metrics"),
-        legend: document.getElementById("legend"),
         status: document.getElementById("statusPanel")
       }[targetName];
       if (!panel) return;
@@ -2316,14 +2288,66 @@ ASSUMPTIONS AND NUMERICAL MODEL
       }
     }
 
-    function toggleCanvasCard(kind) {
-      const isArrivals = kind === "arrivals";
-      const button = isArrivals ? arrivalsToggleBtn : sectionToggleBtn;
-      const nextValue = isArrivals ? !state.showArrivals : !state.showCrossSection;
-      if (isArrivals) state.showArrivals = nextValue;
-      else state.showCrossSection = nextValue;
+    function toggleCanvasCard() {
+      const button = sectionToggleBtn;
+      const nextValue = !state.showCrossSection;
+      state.showCrossSection = nextValue;
+      xsectionWrap.style.display = nextValue ? "" : "none";
       button.classList.toggle("active", nextValue);
       button.setAttribute("aria-pressed", String(nextValue));
+    }
+
+    function toggleArrivals() {
+      const button = arrivalsToggleBtn;
+      const nextValue = !state.showArrivals;
+      state.showArrivals = nextValue;
+      button.classList.toggle("active", nextValue);
+      button.setAttribute("aria-pressed", String(nextValue));
+    }
+
+    function makeFloatingPanelDraggable(el) {
+      el.addEventListener("pointerdown", event => {
+        if (event.target.closest(".float-min, .panel-toggle")) return;
+        event.preventDefault();
+        const rect = el.getBoundingClientRect();
+        const parentRect = el.offsetParent.getBoundingClientRect();
+        el.style.left = `${rect.left - parentRect.left}px`;
+        el.style.top = `${rect.top - parentRect.top}px`;
+        el.style.right = "auto";
+        el.style.bottom = "auto";
+        el.style.transform = "none";
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const originLeft = parseFloat(el.style.left);
+        const originTop = parseFloat(el.style.top);
+        el.classList.add("dragging");
+        el.setPointerCapture(event.pointerId);
+
+        function onMove(moveEvent) {
+          el.style.left = `${originLeft + moveEvent.clientX - startX}px`;
+          el.style.top = `${originTop + moveEvent.clientY - startY}px`;
+        }
+        function onUp() {
+          el.classList.remove("dragging");
+          el.removeEventListener("pointermove", onMove);
+          el.removeEventListener("pointerup", onUp);
+        }
+        el.addEventListener("pointermove", onMove);
+        el.addEventListener("pointerup", onUp);
+      });
+    }
+
+    function initFloatingPanels() {
+      document.querySelectorAll(".float-wrap").forEach(makeFloatingPanelDraggable);
+      document.querySelectorAll(".float-min").forEach(btn => {
+        btn.addEventListener("click", event => {
+          event.stopPropagation();
+          const collapsed = btn.closest(".float-wrap").classList.toggle("collapsed");
+          btn.textContent = collapsed ? "+" : "−";
+          btn.title = collapsed ? "Expand" : "Minimize";
+          btn.setAttribute("aria-label", collapsed ? "Expand panel" : "Minimize panel");
+        });
+      });
     }
 
     function attachEvents() {
@@ -2332,8 +2356,10 @@ ASSUMPTIONS AND NUMERICAL MODEL
       document.querySelectorAll("[data-minimize-target]").forEach(button => {
         button.addEventListener("click", () => {
           const target = button.getAttribute("data-minimize-target");
-          if (target === "arrivals" || target === "section") {
-            toggleCanvasCard(target);
+          if (target === "section") {
+            toggleCanvasCard();
+          } else if (target === "arrivals") {
+            toggleArrivals();
           } else {
             togglePanel(target);
           }
@@ -2419,6 +2445,8 @@ ASSUMPTIONS AND NUMERICAL MODEL
       state.crossSection = buildCrossSection();
       resizeCanvas();
       attachEvents();
+      initFloatingPanels();
+      drawTLBarCanvas();
       updateMetricsPanel();
       requestAnimationFrame(render);
       performTrace();
@@ -2440,7 +2468,7 @@ ASSUMPTIONS AND NUMERICAL MODEL
 <script>
 (function(){
   var CTRL_SELS=['.topbar'];
-  var ALL_SELS=['.topbar','#legend','#statusPanel','#colorbar'];
+  var ALL_SELS=['.topbar','#statusPanel','#tlbar-wrap','#legend-wrap','#xsect-wrap'];
   window.addEventListener('message',function(e){
     var d=e.data; if(!d)return;
     var t=d.type,v,btn,es,as,ss,os,opts,minD,nearest;

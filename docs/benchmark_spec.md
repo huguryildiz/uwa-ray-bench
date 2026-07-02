@@ -2,7 +2,7 @@
 
 **Purpose:** Five-way model comparison — Fugu Ultra vs Opus 4.8 (max reasoning
 effort) vs GPT 5.5 (Extra High) vs Gemini 3.1 Pro High vs Fable 5 Max, all scored
-against a BELLHOP3D reference (ground truth). The same prompt goes to all five LLMs;
+against a BELLHOP3D reference solver (not "ground truth"). The same prompt goes to all five LLMs;
 each produces a self-contained `ray_view.html` that drops into the comparison
 harness as an opaque, isolated `<iframe>`. The BELLHOP3D reference is precomputed
 offline and rendered in its own sixth `<iframe>`, giving the otherwise qualitative
@@ -213,7 +213,7 @@ HARD CONSTRAINTS (so it drops into a comparison harness)
   its own stated numerical assumptions, rather than assuming a shadow classification
   in advance.
 
-## Reference panel (BELLHOP3D — ground truth)
+## Reference panel (BELLHOP3D — reference solver, not "ground truth")
 
 The reference `<iframe>` is NOT a language model. It shows a BELLHOP3D reference
 run on the IDENTICAL scenario (same c(z), D(x,y), S, R, launch fan). Because
@@ -234,48 +234,177 @@ it is not mistaken for a model output.
 
 ## Scoring note
 
-With the BELLHOP3D reference in place this task now HAS a quantitative anchor:
-the harness computes each model's TL RMSE (dB), TL(R) error, shadow-mask error,
-and consistency errors versus Bellhop on the shared grid. The official leader is
-the lowest weighted physics score at the canonical 41 x 31 fan:
+With the BELLHOP3D reference in place this task now HAS a quantitative anchor.
+Scoring is deliberately **not** collapsed into one weighted number. It separates
+three questions — field fidelity, coverage fidelity, geometry fidelity — and
+reports a numerical self-check status alongside them. `harness/scoring.js` is the
+implementation; this section is its source of truth.
+
+### Validation status (informational, not a ranking gate)
+
+Every model gets a `Qualified` / `Provisional` / `Invalid` status, computed from
+its own self-reported numerical self-checks:
+
+```text
+Hard invalid:
+  - malformed metrics payload (no usable TL array)
+  - incomplete canonical-grid coverage (TL array shorter than 101*49*31)
+  - NaN/Inf anywhere in the canonical TL field
+  - reciprocity_error present AND > 3 dB   ("failed hard numerical check")
+  - convergence_TL_R_delta present AND > 5 dB ("failed hard numerical check")
+
+Provisional:
+  - reciprocity_error absent (not yet supported by that panel)
+  - convergence_TL_R_delta absent (not yet supported by that panel)
+
+Qualified:
+  - finite, complete canonical TL data
+  - reciprocity_error <= 3 dB
+  - convergence_TL_R_delta <= 5 dB
+```
+
+**Project decision:** Validation status is reported for every model, on every
+row of the scorecard, but it does **not** gate eligibility for Field / Coverage
+/ Geometry / Composite leadership — every canonical model can lead a column,
+Validation status shown alongside so a strong number is always readable in
+context (a first version of this scheme did gate eligibility on `Qualified`
+only; with the model roster of the day, that emptied the ranking entirely — 3 of
+5 panels don't yet report reciprocity/convergence, one fails its own
+self-consistency caps, and one has NaN in its TL field — which defeated the
+comparison's purpose. NaN/incomplete-grid cells still degrade gracefully to the
+120 dB shadow value inside `scoreModel()` regardless of this decision, so a
+malformed TL field cannot silently produce a garbage score even though it isn't
+excluded from ranking).
+
+### Field Fidelity (TL field accuracy)
 
 ```text
 T_shadow = 120 dB
 C = cells where TL_ref < T_shadow
 
-E_TL   = core_RMSE(clamp(TL_model, T_shadow) - TL_ref over C) / 25
-E_mask = 0.5 * (false_shadow_rate + false_light_rate)
-E_R    = min(abs(TL_R_model - TL_R_ref), 25) / 25
-E_cons = 0.5 * min(reciprocity_error / 3, 1)
-       + 0.5 * min(convergence_TL_R_delta / 5, 1)
+E_core   = winsorized_RMSE(clip(TL_model, T_shadow) - TL_ref over C, cap=20 dB) / 25
+E_smooth = RMSE(box_blur3x3x3(TL_model) - box_blur3x3x3(TL_ref) over C) / 25
+E_recv   = median(min(abs(TL_R_model - TL_R_ref), 25)) / 25   # array of receiver errors, currently length 1
 
-leader_score = 100 * (0.55*E_TL + 0.25*E_mask + 0.15*E_R + 0.05*E_cons)
+E_field = 0.50*E_core + 0.25*E_smooth + 0.25*E_recv     (each term renormalized
+                                                           if a sub-term is unavailable)
+Field_Fidelity = 100 * (1 - clamp(E_field, 0, 1))        # higher wins
 ```
 
-Lower wins. `false_shadow_rate` is the fraction of BELLHOP-insonified cells the
-model marks as shadow; `false_light_rate` is the fraction of BELLHOP-shadow cells
-the model marks as lit. Scores within 2 points are treated as effectively tied;
-that tie is broken by whichever model's out-of-plane |Δy| is closest to the
-BELLHOP3D reference. FPS and visual polish remain reported quality signals, but
-they do not affect the scientific leader. Visual inspection remains useful but
-must not replace the physics-based checks.
+`E_core` is winsorized (each |residual| clipped to 20 dB before squaring) rather
+than raw RMSE, so an isolated caustic-adjacent spike — a known soft spot of the
+geometric-spreading TL approximation — cannot dominate the primary metric.
+`E_smooth` applies the identical smoothing kernel to both fields before RMSE, so
+large-scale energy distribution is visible separately from fine interference-
+pattern mismatch. `E_recv` is a **single-receiver diagnostic** today (only `R` is
+scored); the implementation carries an array of receiver errors so more receiver
+points can be added later without a scoring rewrite.
+
+### Coverage Fidelity (shadow-mask accuracy)
+
+```text
+E_coverage = 0.5 * (false_shadow_rate + false_light_rate)
+Coverage_Fidelity = 100 * (1 - clamp(E_coverage, 0, 1))   # higher wins
+```
+
+`false_shadow_rate` is the fraction of BELLHOP-insonified cells the model marks
+as shadow; `false_light_rate` is the fraction of BELLHOP-shadow cells the model
+marks as lit — each a rate over its own class, so an unbalanced lit/shadow split
+cannot dilute either failure mode. When the full canonical grid is available, the
+harness also reports an **average symmetric shadow-boundary distance**: a
+6-connected multi-source BFS grid-distance between the model's and BELLHOP3D's
+shadow/lit boundary voxels, converted from cell counts to an approximate physical
+distance (km) via the grid pitch `CELL_KM = 0.5` km (approximate and
+grid-quantized, not exact Euclidean — chosen over a raw Hausdorff distance
+because one outlier voxel can dominate that).
+
+### Geometry Fidelity (out-of-plane accuracy)
+
+```text
+out_of_plane_error = abs(deltaY_model - deltaY_reference) / max(abs(deltaY_reference), 500m)
+Geometry_Fidelity = 100 * (1 - clamp(out_of_plane_error, 0, 1))   # higher wins
+```
+
+This is an explicit error against the reference's own |Δy|, never a raw
+deflection magnitude — a model cannot score well here merely by producing a large
+out-of-plane number. Shown as "not yet scored" if either side's |Δy| is
+unavailable.
+
+### Composite Benchmark Score (secondary, informational Validation status)
+
+```text
+E_total = 0.60*E_field + 0.20*E_coverage + 0.20*E_geometry
+Composite = 100 * (1 - clamp(E_total, 0, 1))
+```
+
+Computed for every canonical model, regardless of Validation status. If Geometry
+is unavailable for a given model, its weight re-normalizes across the remaining
+dimensions and the result is marked **provisional composite** (a data-
+availability flag, distinct from the Validation status). The Composite is a
+convenience summary, not the scientific result — Field, Coverage, and Geometry
+each publish their own leader, and the UI never presents Composite as the only
+outcome, and always shows each row's Validation status beside it.
+
+### Deterministic tie-break
+
+Used when two models land on an exactly-equal Composite value (no "within N
+points" window):
+
+```text
+1. lower robust Core err (E_core, in dB)
+2. lower balanced Coverage error (E_coverage)
+3. lower receiver error (median clipped abs error)
+4. lexical panel id
+```
+
+Geometry is intentionally excluded from this chain — it is a genuinely 3D effect
+that may not fire for every model (see "Known risks" below), so it must not
+silently decide close calls.
+
+### Constants (centrally defined in `harness/scoring.js`)
+
+```text
+TL_ERR_CAP    = 25 dB   — normalizes E_core / E_smooth / E_recv into [0,1]
+RECIP_CAP     =  3 dB   — reciprocity qualification threshold
+CONV_CAP      =  5 dB   — convergence ΔTL(R) qualification threshold
+WINSOR_CAP_DB = 20 dB   — |residual| clip before squaring, in E_core
+OOP_EPS_M     = 500 m   — floor on the Geometry Fidelity error denominator
+CELL_KM       = 0.5 km  — x/y grid pitch for the boundary-distance conversion
+```
+
+### Migration note
+
+This scoring scheme replaced an earlier single weighted `leader_score` /
+`leaderOf()` ranking. That API no longer exists in `harness/scoring.js` — the
+current exports are `validateModel`, `scoreModel`, `oopError`, `eligible`,
+`dimensionLeader`, `compositeLeader`, `compareForTiebreak`, and
+`sortScorecardRows`. Anything elsewhere in this repo (docs, comments) that still
+says "weighted leader score" describes the superseded scheme and should be read
+as this section instead.
+
+### Why robust metrics, and BELLHOP3D's own limits
 
 Correctness is whether each model's 3D ray paths, local-slope reflections
 (including out-of-plane deflection), and derived coverage mask are internally
 consistent with the stated profile and bathymetry AND track the reference. RMSE
 is most trustworthy where rays are dense and away from caustics; the geometric-
 spreading TL is approximate, so large isolated spikes near caustics should not
-dominate the score. A useful sanity check: a purely refractive ray that never
-touches the seabed must stay in its launch vertical plane and trace the same path
-as the 2D problem (c depends only on z). The bathymetry is intentionally
-asymmetric in cross-range (seamount 2 offset to y = 9 km), so once seabed
-reflections matter the centerline no longer reduces to 2D — out-of-plane
-deflection should appear downrange of the offset seamount.
+dominate the score — this is exactly why Core err is winsorized rather than raw.
+A useful sanity check: a purely refractive ray that never touches the seabed must
+stay in its launch vertical plane and trace the same path as the 2D problem (c
+depends only on z). The bathymetry is intentionally asymmetric in cross-range
+(seamount 2 offset to y = 9 km), so once seabed reflections matter the centerline
+no longer reduces to 2D — out-of-plane deflection should appear downrange of the
+offset seamount. BELLHOP3D itself is a **reference solver**, not infallible
+ground truth: it is a geometric-spreading, ray-theoretic approximation validated
+against the 2D sanity check above, not a full-wave solution — treat close scores
+near its own known soft spots (caustics, shadow boundaries) with the same caution
+applied to the models.
 
 ## Benchmark validity & scoring calibration (NOT part of the verbatim prompt)
 
-This task is the richest of the candidate benchmarks (real independent ground truth
-via BELLHOP3D, a stable non-chaotic metric, multi-axis discrimination, hard to
+This task is the richest of the candidate benchmarks (a real independent reference
+solver via BELLHOP3D, a stable non-chaotic metric, multi-axis discrimination, hard to
 memorize). Its failure mode is the OPPOSITE of an easy benchmark like the double
 pendulum: not a ceiling effect (everyone passes) but a **floor effect** — the task
 is so demanding that BOTH models fail the hardest parts and the comparison returns
@@ -338,9 +467,9 @@ Six panels are available to the harness: five opaque model `<iframe>`s
 harness no longer keeps all six WebGL panels live at once. `harness/harness.js`
 mounts iframes lazily, warms them sequentially to collect `ray_metrics`, caches
 the scorecard, and keeps at most two live GL panels in the active comparison view
-(selected model + reference). Cinema/overview shows one live leader/fallback panel
-with static posters for the rest; Scorecard and Physics do not require live model
-iframes. Layout and navigation live in `harness/index.html`.
+(selected model + reference). Overview shows static posters for every panel (no
+live GL panel — `activeSetFor('overview')` is empty); Scorecard does not require
+live model iframes either. Layout and navigation live in `harness/index.html`.
 
 The five model files are produced from the verbatim prompt and remain opaque
 submissions. The reference panel renders precomputed Bellhop binary data with the
@@ -353,21 +482,21 @@ five so only the models' physics and rendering differ.
 
 Harness-only features (built once by the harness, NOT required of the model files):
 
-- **Single primary menu bar:** the harness chrome exposes four top-level modes only:
-  Cinema, Compare, Scorecard, and Physics. Cinema is the default gallery/preview
+- **Single primary menu bar:** the harness chrome exposes three top-level modes only:
+  Overview, Compare, and Scorecard. Overview is the default gallery/preview
   view; Compare owns the model-vs-reference view and its TL diff overlay control;
-  Scorecard owns ranking/metric comparison; Physics opens the BELLHOP3D equations
-  and scenario notes. There is no second tab strip.
+  Scorecard owns ranking/metric comparison. There is no second tab strip.
 - **Synchronized camera:** orbit/zoom on one live panel can drive the currently
   mounted comparison peer, so the model and reference volumes are viewed from the
   same angle. The model files should expose set/get camera pose via `postMessage`.
 - **Diff overlay (model − BELLHOP3D):** a per-cell TL-error volume on the shared
   canonical grid, colour-mapped (e.g. blue = under, red = over), so where each
   model deviates from the reference is visible at a glance.
-- **Final scorecard / ranking:** one table aggregating every model's weighted
-  leader score, TL RMSE, core RMSE, shadow-mask error, TL(R) error, reciprocity
-  error, convergence delta, coverage, and 3D-fidelity numbers, ranking the models
-  against the reference.
+- **Final scorecard / ranking:** one table aggregating every model's Validation
+  status, Field/Coverage/Geometry Fidelity, Composite, core err, TL(R) error,
+  reciprocity error, convergence delta, coverage, and 3D-fidelity numbers,
+  ranking the models against the reference per the Scoring note above (no single
+  weighted leader score — see Migration note).
 - **Cursor readout tooltip:** hovering the focused panel shows depth, bathymetry
   D(x,y), and local sound speed c(z) at the cursor. The scenario is analytic, so
   the harness computes these directly from c(z) and D(x,y) using only the cursor's
@@ -428,6 +557,7 @@ uwa-ray-bench/
 │   ├── index.html                        # static harness chrome and six iframe cells
 │   ├── harness.js                        # lazy iframe lifecycle, postMessage aggregation,
 │   │                                     #   TL RMSE vs Bellhop, diff overlay, scorecard
+│   ├── scoring.js                        # validation + field/coverage/geometry/composite scoring
 │   └── perf.js                           # opt-in dev overlay for ?perf=1
 │
 └── tools/

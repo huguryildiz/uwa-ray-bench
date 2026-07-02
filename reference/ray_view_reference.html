@@ -50,10 +50,42 @@
   #wrap{position:fixed;inset:0}
   #gl,#ov{position:absolute;inset:0;width:100%;height:100%;display:block}
   #gl{z-index:1} #ov{z-index:2;pointer-events:none}
-  #xsect{position:absolute;left:10px;bottom:46px;width:280px;height:170px;z-index:3;
+  /* ---- floating panels: draggable + minimizable (xsect inset, legend, TL bar) ---- */
+  .float-wrap{position:absolute;z-index:3;pointer-events:all;touch-action:none;cursor:grab}
+  .float-wrap.dragging{cursor:grabbing}
+  .float-min{position:absolute;top:4px;right:4px;z-index:4;pointer-events:all;
+    background:rgba(20,35,62,.5);color:var(--muted);border:1px solid var(--hair);
+    border-radius:6px;width:17px;height:17px;padding:0;font-size:10px;font-weight:600;line-height:1;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+  .float-min:hover{border-color:rgba(150,210,255,.34);color:var(--ink)}
+  .float-wrap.collapsed{width:auto!important;height:auto!important}
+  .float-wrap.collapsed>*:not(.float-min){display:none}
+  .float-wrap.collapsed .float-min{position:static;width:auto;height:20px;padding:0 8px;
+    font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;border-radius:8px;
+    background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+
+  #xsect-wrap{left:10px;bottom:46px;width:196px;height:119px}
+  #xsect{width:100%;height:100%;
     border-radius:10px;background:rgba(9,11,30,.75);border:1px solid var(--hair);
     backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
     pointer-events:none;display:block}
+
+  #legend-wrap{left:10px;bottom:175px}
+  #legend{background:rgba(8,14,26,.72);border:1px solid var(--hair);border-radius:8px;
+    padding:8px 10px;font:11px -apple-system,sans-serif;color:#cfe3ff;
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+  #legend .lg-row{display:flex;align-items:center;gap:8px;padding:3px 0;white-space:nowrap}
+  #legend .lg-sw{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+
+  #tlbar-wrap{right:16px;top:70px}
+  #tlbar-inner{display:flex;align-items:center;gap:6px;background:rgba(8,14,26,.55);
+    border-radius:8px;padding:8px 10px;
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+  #tlbar-inner .tl-col{display:flex;flex-direction:column;align-items:center;gap:4px;
+    font:11px -apple-system,sans-serif;color:#cfe3ff}
+  #tlbar{border-radius:2px;display:block}
+  #tlbar-inner .tl-side{writing-mode:vertical-rl;transform:rotate(180deg);
+    font:11px -apple-system,sans-serif;color:#cfe3ff}
 
   /* ---- DRAWER (B): right-edge metrics panel ---- */
   #drawer{position:absolute;right:0;top:0;bottom:38px;z-index:3;
@@ -139,7 +171,27 @@
 <div id="wrap">
   <canvas id="gl"></canvas>
   <canvas id="ov"></canvas>
-  <canvas id="xsect"></canvas>
+  <div id="xsect-wrap" class="float-wrap">
+    <canvas id="xsect"></canvas>
+    <button class="float-min" title="Minimize">–</button>
+  </div>
+  <div id="legend-wrap" class="float-wrap">
+    <div id="legend">
+      <div class="lg-row"><span class="lg-sw" style="background:#ffd36b"></span>source S</div>
+      <div class="lg-row"><span class="lg-sw" style="background:#9fe8ff"></span>receiver R</div>
+      <div class="lg-row"><span class="lg-sw" style="background:#b08c5a"></span>seabed / seamounts</div>
+      <div class="lg-row"><span class="lg-sw" style="background:#6cf"></span>rays (by launch angle)</div>
+      <div class="lg-row"><span class="lg-sw" style="background:#2aa0d0"></span>insonified TL volume</div>
+    </div>
+    <button class="float-min" title="Minimize">–</button>
+  </div>
+  <div id="tlbar-wrap" class="float-wrap">
+    <div id="tlbar-inner">
+      <div class="tl-col"><span>115</span><canvas id="tlbar" width="12" height="150"></canvas><span>45 dB</span></div>
+      <span class="tl-side">TL (dB)</span>
+    </div>
+    <button class="float-min" title="Minimize">–</button>
+  </div>
   <!-- B: right-edge metrics drawer -->
   <div id="drawer">
     <div id="drawer-tab">METRICS</div>
@@ -486,7 +538,6 @@ function bindA(p,name,b,size,stride,offset){const l=gl.getAttribLocation(p,name)
 /* ========================= 2D overlay (labels/legend/colorbar) ========================= */
 function drawOverlay(){
   octx.clearRect(0,0,ov.width,ov.height); octx.save(); octx.scale(dpr,dpr);
-  const W=ov.width/dpr,H=ov.height/dpr;
   octx.font='11px -apple-system,sans-serif'; octx.textAlign='center';
   octx.fillStyle='#9bb6d8';
   for(let xk=0;xk<=X_MAX;xk+=10){const p=project(...toScene(xk,0,Z_MAX));
@@ -506,24 +557,6 @@ function drawOverlay(){
     octx.strokeStyle=reached?'#39d98a':'#ff5a5a';octx.lineWidth=2;
     octx.beginPath();octx.arc(pr.x,pr.y,11,0,7);octx.stroke();
     octx.fillStyle='#9fe8ff';octx.font='bold 12px sans-serif';octx.fillText('R',pr.x,pr.y-14);}
-  // legend
-  octx.textAlign='left';octx.font='11px sans-serif';
-  const lg=[['#ffd36b','source S'],['#9fe8ff','receiver R'],
-    ['#b08c5a','seabed / seamounts'],['#6cf','rays (by launch angle)'],
-    ['#2aa0d0','insonified TL volume']];
-  const legendH=18*lg.length+8;
-  let ly=Math.max(26,H-226-legendH+14);
-  octx.fillStyle='rgba(8,14,26,.6)';octx.fillRect(8,ly-14,156,legendH);
-  for(const[c,t]of lg){octx.fillStyle=c;octx.fillRect(14,ly-9,10,10);
-    octx.fillStyle='#cfe3ff';octx.fillText(t,30,ly);ly+=18;}
-  // TL colorbar
-  if(showVol){const bx=W-58,by=70,bh=150;
-    for(let i=0;i<bh;i++){const tl=45+(i/bh)*70;const c=tlColor(tl);
-      octx.fillStyle=`rgb(${c.map(v=>v*255|0).join(',')})`;octx.fillRect(bx,by+bh-i,12,1);}
-    octx.fillStyle='#cfe3ff';octx.textAlign='right';
-    octx.fillText('45 dB',bx-3,by+bh);octx.fillText('115',bx-3,by+8);
-    octx.save();octx.translate(W-38,by+bh/2);octx.rotate(Math.PI/2);
-    octx.textAlign='center';octx.fillText('TL (dB)',0,0);octx.restore();}
   octx.restore();
 }
 
@@ -566,11 +599,14 @@ function drawXSection(){
   const PAD={l:34,r:6,t:34,b:22};
   const pw=W-PAD.l-PAD.r, ph=H-PAD.t-PAD.b;
   ctx.clearRect(0,0,W,H);
-  // title
+  // title (two lines so it clears the minimize button in the top-right corner)
   ctx.fillStyle='rgba(155,182,216,.75)';
-  ctx.font='bold 9px "IBM Plex Mono",monospace';
+  ctx.font='bold 8px "IBM Plex Mono",monospace';
   ctx.textAlign='left';
-  ctx.fillText('Centerline x-section  y = 12 km  (x–z)',PAD.l,12);
+  ctx.fillText('Centerline x-section (x–z)',PAD.l,10);
+  ctx.fillStyle='rgba(155,182,216,.55)';
+  ctx.font='7.5px "IBM Plex Mono",monospace';
+  ctx.fillText('y = 12 km',PAD.l,19);
   // coord helpers
   const cx=xk=>PAD.l+xk/X_MAX*pw;
   const cz=zm=>PAD.t+zm/Z_MAX*ph;
@@ -715,11 +751,38 @@ document.getElementById('azimsel').onchange=e=>loadStop(curStop.elev,e.target.va
 document.getElementById('speed').oninput=e=>speed=+e.target.value;
 document.getElementById('scrub').oninput=e=>{playing=false;
   document.getElementById('play').textContent='▶ Play';curTime=+e.target.value*tMax*1.25; markDirty();};
-document.getElementById('volchk').onchange=e=>{showVol=e.target.checked; overlayDirty=true; markDirty();};
+document.getElementById('volchk').onchange=e=>{showVol=e.target.checked; overlayDirty=true; markDirty(); updateTLBarVisibility();};
 document.getElementById('opac').oninput=e=>{volOp=+e.target.value; markDirty();};
 function toggleDrawer(){document.getElementById('drawer').classList.toggle('open');}
 document.getElementById('drawer-tab').onclick=toggleDrawer;
 document.getElementById('drawer-close').onclick=toggleDrawer;
+
+/* ========================= floating panels: TL bar, drag, minimize ========================= */
+function updateTLBarVisibility(){document.getElementById('tlbar-wrap').style.display=showVol?'':'none';}
+function drawTLBarCanvas(){
+  const c=document.getElementById('tlbar'), tctx=c.getContext('2d'), bh=c.height;
+  for(let y=0;y<bh;y++){const tl=115-(y/bh)*70,col=tlColor(tl);
+    tctx.fillStyle=`rgb(${col.map(v=>v*255|0).join(',')})`; tctx.fillRect(0,y,c.width,1);}
+}
+function makeDraggable(el){
+  el.addEventListener('pointerdown',e=>{
+    if(e.target.closest('.float-min'))return;
+    e.preventDefault();
+    const rect=el.getBoundingClientRect(), parentRect=el.offsetParent.getBoundingClientRect();
+    el.style.left=(rect.left-parentRect.left)+'px'; el.style.top=(rect.top-parentRect.top)+'px';
+    el.style.right='auto'; el.style.bottom='auto';
+    const sx=e.clientX, sy=e.clientY, ol=parseFloat(el.style.left), ot=parseFloat(el.style.top);
+    el.classList.add('dragging'); el.setPointerCapture(e.pointerId);
+    function onMove(e2){el.style.left=(ol+e2.clientX-sx)+'px'; el.style.top=(ot+e2.clientY-sy)+'px';}
+    function onUp(){el.classList.remove('dragging');
+      el.removeEventListener('pointermove',onMove); el.removeEventListener('pointerup',onUp);}
+    el.addEventListener('pointermove',onMove); el.addEventListener('pointerup',onUp);
+  });
+}
+document.querySelectorAll('.float-wrap').forEach(makeDraggable);
+document.querySelectorAll('.float-min').forEach(btn=>{btn.onclick=e=>{e.stopPropagation();
+  const collapsed=btn.closest('.float-wrap').classList.toggle('collapsed');
+  btn.textContent=collapsed?'⤢':'–'; btn.title=collapsed?'Expand':'Minimize';};});
 
 /* ========================= parent messages ========================= */
 addEventListener('message',e=>{const m=e.data||{};switch(m.type){
@@ -728,7 +791,7 @@ addEventListener('message',e=>{const m=e.data||{};switch(m.type){
   case'play': playing=true;document.getElementById('play').textContent='❚❚ Pause';markDirty();break;
   case'pause': playing=false;document.getElementById('play').textContent='▶ Play';markDirty();break;
   case'reset': playing=false;curTime=0;document.getElementById('play').textContent='▶ Play';markDirty();break;
-  case'set_volume': showVol=!!m.on;document.getElementById('volchk').checked=showVol;overlayDirty=true;markDirty();break;
+  case'set_volume': showVol=!!m.on;document.getElementById('volchk').checked=showVol;overlayDirty=true;markDirty();updateTLBarVisibility();break;
   case'set_opacity': volOp=+m.v;document.getElementById('opac').value=volOp;markDirty();break;
   case'set_speed': speed=Math.max(0.25,Math.min(4,+m.speed||1));document.getElementById('speed').value=speed;break;
   case'set_time': playing=false;curTime=Math.max(0,Math.min(1,+m.t||0))*tMax*1.25;
@@ -741,7 +804,8 @@ addEventListener('message',e=>{const m=e.data||{};switch(m.type){
 /* ========================= boot ========================= */
 (async()=>{ try{
   // fix xsect canvas backing-store size (CSS handles display size)
-  const xc=document.getElementById('xsect'); xc.width=280; xc.height=170;
+  const xc=document.getElementById('xsect'); xc.width=196; xc.height=119;
+  drawTLBarCanvas(); updateTLBarVisibility();
   await loadManifest();
   await loadStop(41,31);
   // drawer starts closed; dock is always visible at bottom

@@ -73,7 +73,7 @@ PHYSICS — MANDATORY (this is the crux; do not shortcut it)
   so values stay finite. The shadow threshold MUST be defined in terms of TL
   (e.g. a voxel is "shadow" if TL exceeds a stated dB cutoff); state the cutoff.
 
-CANONICAL CONFIG (the scored operating point — identical for all three panels)
+CANONICAL CONFIG (the scored operating point — identical for all model panels)
 - Launch fan: elevation -20 to +20 deg with 41 beams (1 deg step); azimuth -15 to
   +15 deg with 31 beams (1 deg step) => 1271 rays. This is the canonical fan.
 - Seabed half-space: c = 1600 m/s, rho = 1.8 g/cc, alpha = 0.5 dB/lambda.
@@ -142,13 +142,13 @@ ANIMATION & RENDERING
   opacity. The beam sliders may move off canonical for exploration, but doing so
   flags the metric card "off-canonical" (see CANONICAL CONFIG). Do NOT expose
   sliders that change the scenario itself (sound-speed profile, bathymetry, S/R
-  positions, launch-angle limits): those stay fixed so the three panels remain
+  positions, launch-angle limits): those stay fixed so the model panels remain
   directly comparable.
 
 - METRICS PANEL: render a compact card in a corner showing this model's own
   computed metrics, and also send them to the parent via
   window.parent.postMessage({type:'ray_metrics', ...}, '*') so the harness can lay
-  the three cards side by side (postMessage only — no network). Report:
+  the model cards side by side (postMessage only — no network). Report:
   * Reachability: is R reached (yes/no) + nearest-ray miss distance to R (m) + TL(R) in dB
   * Coverage: insonified voxel fraction (%) and shadow fraction (%)
   * 3D fidelity: max out-of-plane deflection of any ray |Δy| from its launch

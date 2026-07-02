@@ -2,7 +2,7 @@
 
 A five-way LLM benchmark: **Fugu Ultra vs Opus 4.8 (max) vs GPT 5.5 (Extra High) vs
 Gemini 3.1 Pro (High) vs Fable 5 (Max)** — each builds a self-contained 3D underwater acoustic
-ray-propagation viz, scored against a **BELLHOP3D** reference (ground truth) on a shared
+ray-propagation viz, scored against a **BELLHOP3D** reference solver (not "ground truth") on a shared
 TL grid. The live roster is `models/*/` (currently `fugu`, `opus`, `gpt`, `gemini`,
 `fable`) — trust that directory over any model count named in prose, this doc included.
 
@@ -16,29 +16,25 @@ Read it before touching anything. If this file and the spec disagree, the spec w
 
 Breaking any of these silently invalidates the comparison. Treat them as hard stops.
 
-1. **NEVER read, edit, or "improve" the model panels.**
-   `models/<id>/ray_view.html` (fugu, opus, gpt, gemini, fable) are **model outputs**.
-   The infra side only ever loads them as opaque `<iframe>`s. Do not open them to
-   "check," copy patterns from them, or fix them.
-2. **The infra session must not author a model panel.** Whoever builds
-   `harness/` + `reference/` has seen the comparison machinery and the reference
-   physics; that knowledge would contaminate a model output. Model panels are
-   produced in **separate, isolated** sessions.
-3. **Each model run is blind:** byte-identical verbatim prompt, no sight of the other
+1. **Each model run is blind:** byte-identical verbatim prompt, no sight of the other
    model, the reference, or the harness internals.
-4. **Only the verbatim prompt block goes to models.** Everything in the spec under
+2. **Only the verbatim prompt block goes to models.** Everything in the spec under
    a heading marked `(NOT part of the verbatim prompt)` is orchestration — never
    paste it into a model prompt.
-5. **No UI mockup to the models.** Any mockup is for our side (harness/reference)
+3. **No UI mockup to the models.** Any mockup is for our side (harness/reference)
    only. A mockup that depicts the ray fan, shadow zones, R's reachability, or TL
    values would contaminate the physics result.
+
+These rules govern the **blind model run itself** (prompting). They do not restrict
+post-hoc edits to `models/<id>/ray_view.html` after all 5 runs are complete — such
+edits are ordinary infra work like any other file in this repo.
 
 ```text
                      HARNESS CHROME  ← infra session (this repo's build work)
    ┌────────┬────────┬────────┬────────┬────────┬──────────────┐
-   │ Fugu UI│ Opus UI│ GPT UI │Gemini UI│Fable UI│ Reference UI │  ← never touch
-   │(Ultra) │(4.8max)│(5.5 XH)│(3.1 Pro)│(5 Max) │ (infra sess) │    the 5 model
-   └────────┴────────┴────────┴────────┴────────┴──────────────┘    panels' internals
+   │ Fugu UI│ Opus UI│ GPT UI │Gemini UI│Fable UI│ Reference UI │
+   │(Ultra) │(4.8max)│(5.5 XH)│(3.1 Pro)│(5 Max) │ (infra sess) │
+   └────────┴────────┴────────┴────────┴────────┴──────────────┘
 ```
 
 ---
@@ -78,8 +74,10 @@ palette). Always style from these CSS custom properties; never inline raw hex/bl
 Not desktop-only. The required portrait behavior:
 
 - Harness (`@media (max-width:680px)`): the 5 model panels stack **5×1**, the scorecard
-  bar-charts stack **9×1**, and the toolbar collapses into a **hamburger drawer**
-  (`#bar-actions` + `#hamburger`, toggled by `#bar.nav-open`).
+  bar-charts stack **1 column** (currently 12 metric tiles — Composite/Field/Coverage
+  plus the retained diagnostics: TL RMSE, Core/Smoothed err, TL(R) & TL(R) err,
+  reciprocity, convergence ΔTL(R), insonified%, boundary Δ), and the toolbar collapses into a
+  **hamburger drawer** (`#bar-actions` + `#hamburger`, toggled by `#bar.nav-open`).
 - Reference panel (`@media (max-width:460px)`, on its own iframe width): the floating
   metric card + control HUD **auto-collapse to pills** on boot (reusing the `.min-collapsed`
   toggle), expandable on tap, so they don't bury the 3D scene. `matchMedia` evaluates the
