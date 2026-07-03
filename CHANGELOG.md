@@ -19,7 +19,8 @@ scored against a genuine 3D BELLHOP3D reference solve on a shared TL grid.
   composite score) computed from each panel's exported TL field, with
   per-column winner highlighting in the scorecard table.
 - Cinema mode — hides all panel chrome to show only the ray fans.
-- Mobile-portrait support throughout: 5-panel stacking in Overview, a
+- Mobile-portrait support throughout: 6-panel stacking in Overview
+  (5 models + BELLHOP3D reference), a
   hamburger drawer for the toolbar, and vertical (1×2) stacking of the
   Compare tab's reference/model panels instead of a cramped side-by-side
   split.
@@ -40,3 +41,4 @@ scored against a genuine 3D BELLHOP3D reference solve on a shared TL grid.
   3-tab (Gallery / Compare / Scorecard) design.
 - Reconciled README and `docs/benchmark_spec.md` with the 3-tab harness
   refactor to remove doc/code drift.
+- Renamed the browser tab title to `Underwater Acoustic Ray Bench`.
