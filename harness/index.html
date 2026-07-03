@@ -18,7 +18,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>UWA Ray-Propagation Benchmark — Console</title>
+<title>Underwater Acoustic Ray Bench</title>
 <link rel="icon" href="data:,">
 <style>
   @font-face{font-family:Newsreader;src:url(../fonts/newsreader-500.woff2) format('woff2');font-weight:500;font-display:swap}
@@ -557,9 +557,9 @@
     #bar-actions .pop{position:static;margin-top:4px;min-width:0;width:100%;
       box-shadow:none;background:rgba(255,255,255,.04)}
 
-    /* grid fills viewport height — Overview stacks all 5 model panels 1×5 */
+    /* grid fills viewport height — Overview stacks all 6 panels (5 models + reference) 1×6, scrolls */
     #grid{height:calc(100svh - 132px)}
-    body.tab-overview #grid{grid-template-columns:1fr;grid-template-rows:repeat(5,1fr)}
+    body.tab-overview #grid{grid-template-columns:1fr;grid-template-rows:repeat(6,minmax(150px,1fr));height:auto}
     #score-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
     #score th,#score td{white-space:nowrap}
 
