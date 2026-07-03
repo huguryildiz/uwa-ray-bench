@@ -864,15 +864,16 @@ ASSUMPTIONS / MODEL NOTES
     if (!model || !model.coveragePoints || !model.coveragePoints.length) return;
     const opacity = Number(UI.opacitySlider.value) / 100;
     if (opacity <= 0.001) return;
-    const pts = model.coveragePoints.map(p => ({ p, q: project(p) })).sort((a,b) => b.q.d - a.q.d);
     const tlMode = UI.tlToggle.checked;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    for (const item of pts) {
-      const q = item.q;
+    // Additive 'lighter' blending is order-independent, so skip the per-frame depth sort and
+    // intermediate array — project inline to keep this splat loop allocation-free each frame.
+    for (const p of model.coveragePoints) {
+      const q = project(p);
       if (q.x < -30 || q.x > state.w + 30 || q.y < -30 || q.y > state.h + 30) continue;
       const r = clamp(q.s * 0.035, 1.2, 4.2);
-      ctx.fillStyle = tlMode ? tlColor(item.p.tl, 0.08 + 0.22*opacity) : `rgba(90, 223, 255, ${0.05 + 0.20*opacity})`;
+      ctx.fillStyle = tlMode ? tlColor(p.tl, 0.08 + 0.22*opacity) : `rgba(90, 223, 255, ${0.05 + 0.20*opacity})`;
       ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, Math.PI*2); ctx.fill();
     }
     ctx.restore();
@@ -965,8 +966,10 @@ ASSUMPTIONS / MODEL NOTES
       strokeRayPolyline(ray, 0, end, historyStride);
     }
 
-    // Bright moving wavefront / recent trail.
-    ctx.shadowBlur = 4;
+    // Bright moving wavefront / recent trail. shadowBlur on hundreds of per-ray strokes/dots
+    // is the dominant per-frame cost and stutters the canvas; 'lighter' compositing already
+    // gives an additive glow, so keep blur off in this hot loop.
+    ctx.shadowBlur = 0;
     for (let ri = 0; ri < model.rays.length; ri += brightEvery) {
       const ray = model.rays[ri];
       const end = visibleRayEndIndex(ray.points, time);

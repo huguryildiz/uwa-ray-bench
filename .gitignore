@@ -15,6 +15,9 @@ __pycache__/
 output/
 AGENTS.md
 
+# Local screen-recording clips (not shipped)
+grid_clips/
+
 # Original unmodified model outputs (local reference only)
 models/orig/
 
