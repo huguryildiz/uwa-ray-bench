@@ -822,10 +822,10 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
       ctx.beginPath();points.forEach((p,i)=>{const s=project(p);i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);});ctx.closePath();ctx.fillStyle=fill;ctx.fill();if(stroke!=='transparent'){ctx.strokeStyle=stroke;ctx.lineWidth=width;ctx.stroke();}
     }
     function tlColour(t,alpha=1) {
-      const u=clamp((t-55)/(C.TL_CUT-55),0,1);
-      const stops=[[233,205,124],[111,190,161],[58,132,158],[28,68,101],[8,21,37]];
-      const x=u*(stops.length-1),i=Math.min(stops.length-2,Math.floor(x)),f=x-i,a=stops[i],b=stops[i+1];
-      return `rgba(${Math.round(lerp(a[0],b[0],f))},${Math.round(lerp(a[1],b[1],f))},${Math.round(lerp(a[2],b[2],f))},${alpha})`;
+      // BELLHOP3D reference colormap: 45..115 dB -> warm(loud) -> cool/dark(quiet)
+      const s=clamp((t-45)/70,0,1);
+      const r=clamp(1.4*s-0.2,0,1)*0.9+0.1, g=Math.sin(Math.PI*s)*0.85, b=clamp(1.2-1.6*s,0,1)*0.95;
+      return `rgba(${Math.round(r*255)},${Math.round(g*255)},${Math.round(b*255)},${alpha})`;
     }
     function rayColour(ray,alpha=1) {
       const u=(ray.elev-C.EMIN)/(C.EMAX-C.EMIN),h=lerp(8,215,u),light=66+4*Math.cos(ray.az*DEG*5);
