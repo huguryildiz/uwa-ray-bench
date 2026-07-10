@@ -233,6 +233,9 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
     html.embedded .dock { grid-template-rows: 1fr; }
     html.embedded .metric-panel { display: none; }
     html.embedded .app { grid-template-columns: 1fr; grid-template-areas: "scene" "dock"; }
+    /* BELLHOP3D reference has no arrivals plot — hide it in the comparison, cross-section spans full width */
+    html.embedded .plots { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+    html.embedded .plots .plot:last-child { display: none; }
   </style>
   <script>if (window.self !== window.top) document.documentElement.classList.add('embedded');</script>
 </head>
