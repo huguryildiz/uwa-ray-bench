@@ -875,7 +875,7 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
     }
 
     function drawCoverage(fan) {
-      if(!fan||!fan.cloud||state.opacity<=0)return;
+      if(!fan||!fan.cloud||state.opacity<=0||state.volumeOn===false)return;
       const pts=fan.cloud.map(p=>({p,q:project(p)})).sort((a,b)=>b.q.depth-a.q.depth);
       ctx.globalCompositeOperation='lighter';
       for(const o of pts){const a=state.opacity*(.20+.34*o.q.scale),r=clamp(1.1*o.q.scale,0.65,2.2);ctx.fillStyle=state.tlColour?tlColour(o.p.tl,a):`rgba(79,177,164,${a})`;ctx.fillRect(o.q.x-r,o.q.y-r,r*2,r*2);}
@@ -1002,6 +1002,10 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
         case'reset': setPlaying(false); state.time=0; $('timeSlider').value=0; $('timeOutput').textContent='0.00 s'; state.dirty=state.plotDirty=true; break;
         case'set_speed': if(m.speed>0)state.speed=m.speed; break;
         case'set_time': if(m.t!=null&&state.display){setPlaying(false); state.time=clamp(m.t,0,1)*state.display.maxTime; $('timeSlider').value=state.time; $('timeOutput').textContent=`${state.time.toFixed(2)} s`; state.dirty=state.plotDirty=true;} break;
+        case'set_stop': if(m.elev!=null&&m.azim!=null){$('elevSlider').value=m.elev; $('azSlider').value=m.azim; $('elevOutput').textContent=$('elevSlider').value; $('azOutput').textContent=$('azSlider').value; if(typeof updateCanonicalBadge==='function')updateCanonicalBadge(); retraceDisplay();} break;
+        case'set_volume': state.volumeOn=(m.on!==false); state.dirty=true; break;
+        case'set_opacity': if(m.v!=null){state.opacity=clamp(m.v,0,1); state.dirty=true;} break;
+        case'set_camera': resetCamera(); break;
       }
     });
     function resetCamera(){state.camera={yaw:.75,pitch:-.51,zoom:.98};state.dirty=true;}
