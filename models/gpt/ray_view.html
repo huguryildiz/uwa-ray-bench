@@ -230,11 +230,21 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
        the harness supplies the label chip and drives playback; keep them for standalone viewing */
     html.embedded .scene-head > :first-child { display: none; }
     html.embedded .controls { display: none; }
-    html.embedded .dock { grid-template-rows: 1fr; }
     html.embedded .metric-panel { display: none; }
-    html.embedded .app { grid-template-columns: 1fr; grid-template-areas: "scene" "dock"; }
-    /* BELLHOP3D reference has no arrivals plot — hide it in the comparison, cross-section spans full width */
-    html.embedded .plots { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+    html.embedded .scene-shell { border: none; }
+    /* scene fills the whole panel; the cross-section becomes a small floating x–z inset like the reference */
+    html.embedded .app { position: relative; grid-template-columns: 1fr; grid-template-rows: 1fr; grid-template-areas: "scene"; }
+    html.embedded .dock {
+      position: absolute; left: 10px; bottom: 12px; z-index: 3;
+      width: 208px; height: 128px; min-height: 0; grid-template-rows: 1fr;
+      border: 1px solid rgba(100,140,255,.18); border-radius: 10px; overflow: hidden;
+      background: rgba(9,11,30,.75); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    }
+    html.embedded #legend-wrap { bottom: 152px; }
+    html.embedded .plot-title { font-size: 7px; letter-spacing: .04em; }
+    /* BELLHOP3D reference has no arrivals plot — hide it in the comparison, cross-section spans the inset */
+    html.embedded .plots { grid-template-columns: 1fr; grid-template-rows: 1fr; min-height: 0; }
+    html.embedded .plots .plot, html.embedded .plots .plot:first-child { min-height: 0; }
     html.embedded .plots .plot:last-child { display: none; }
   </style>
   <script>if (window.self !== window.top) document.documentElement.classList.add('embedded');</script>
