@@ -35,7 +35,7 @@
 
 ## What this is
 
-Five LLMs — **Fugu Ultra**, **Opus 4.8 (max)**, **GPT 5.6 (Sol Ultra)**,
+Five LLMs — **Fugu Ultra**, **Opus 4.8 (max)**, **GPT 5.6 Sol (Ultra)**,
 **Gemini 3.1 Pro (High)**, and **Fable 5 (Max)** — each received the exact same
 [verbatim prompt](docs/model_prompt.md) in a separate, isolated session: trace a fan of
 1,271 rays from a source through a synthetic 3D ocean (depth-dependent sound-speed
@@ -61,7 +61,7 @@ for the full formulas. This section reports the latest canonical (41×31) run:
 
 | Rank | Model | Composite | Field | Coverage |
 | :---: | --- | ---: | ---: | ---: |
-| 🥇 | **GPT 5.6 (Sol Ultra)** | **71.3** \* | 62.8 | 96.7 |
+| 🥇 | **GPT 5.6 Sol (Ultra)** | **71.3** \* | 62.8 | 96.7 |
 | 🥈 | **Sakana Fugu (Ultra)** | 66.8 \* | 57.4 | 95.0 |
 | 🥉 | **Fable 5 (Max)** | 64.0 \* | 57.2 | 84.5 |
 | 4 | **Opus 4.8 (max)** | 56.4 \* | 46.8 | 85.1 |
@@ -83,14 +83,14 @@ convergence, insonified%, boundary distance).*
 
 | Criterion | Leader |
 | --- | --- |
-| Field Fidelity (↑) | **GPT 5.6 (Sol Ultra)** |
-| Coverage Fidelity (↑) | **GPT 5.6 (Sol Ultra)** |
-| Boundary Δ (↓) | **GPT 5.6 (Sol Ultra)** |
-| Composite (provisional, ↑) | **GPT 5.6 (Sol Ultra)** |
+| Field Fidelity (↑) | **GPT 5.6 Sol (Ultra)** |
+| Coverage Fidelity (↑) | **GPT 5.6 Sol (Ultra)** |
+| Boundary Δ (↓) | **GPT 5.6 Sol (Ultra)** |
+| Composite (provisional, ↑) | **GPT 5.6 Sol (Ultra)** |
 | Core err, dB (↓) | **Sakana Fugu** |
 | TL RMSE, full-field, dB (↓) | **Fable 5 (Max)** |
 | Smoothed err, dB (↓) | **Fable 5 (Max)** |
-| TL(R) err, dB (↓) | **GPT 5.6 (Sol Ultra)** |
+| TL(R) err, dB (↓) | **GPT 5.6 Sol (Ultra)** |
 
 *Full values and the rest of the field for each criterion are in the ranking
 table above and the live **Scorecard** tab.*

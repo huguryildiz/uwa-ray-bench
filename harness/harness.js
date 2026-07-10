@@ -17,7 +17,7 @@ const NX=101, NY=49, NZ=31, TL_SHADOW=SCORING.TL_SHADOW, NTL=NX*NY*NZ;
 const PANELS=[
   {id:'fugu',      name:'Sakana Fugu'},
   {id:'opus',      name:'Opus 4.8 (max)'},
-  {id:'gpt',       name:'GPT 5.6 (Sol Ultra)'},
+  {id:'gpt',       name:'GPT 5.6 Sol (Ultra)'},
   {id:'gemini',    name:'Gemini 3.1 Pro'},
   {id:'fable',     name:'Fable 5 (Max)'},
   {id:'reference', name:'BELLHOP3D'},

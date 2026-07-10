@@ -1,6 +1,6 @@
 # uwa-ray-bench — Project Rules
 
-A five-way LLM benchmark: **Fugu Ultra vs Opus 4.8 (max) vs GPT 5.6 (Sol Ultra) vs
+A five-way LLM benchmark: **Fugu Ultra vs Opus 4.8 (max) vs GPT 5.6 Sol (Ultra) vs
 Gemini 3.1 Pro (High) vs Fable 5 (Max)** — each builds a self-contained 3D underwater acoustic
 ray-propagation viz, scored against a **BELLHOP3D** reference solver (not "ground truth") on a shared
 TL grid. The live roster is `models/*/` (currently `fugu`, `opus`, `gpt`, `gemini`,

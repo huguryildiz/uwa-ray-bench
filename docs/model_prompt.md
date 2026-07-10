@@ -1,7 +1,7 @@
 # Model prompt (NOT part of the verbatim prompt — this note only)
 
 This is the exact, byte-identical prompt handed to every model under test —
-Sakana Fugu (Ultra), Opus 4.8 (max), GPT 5.6 (Sol Ultra), Gemini 3.1 Pro
+Sakana Fugu (Ultra), Opus 4.8 (max), GPT 5.6 Sol (Ultra), Gemini 3.1 Pro
 (High), and Fable 5 (Max). Per the fairness rules in [CLAUDE.md](../CLAUDE.md), each
 model received this text in its own isolated session, with no sight of the
 other models, the reference implementation, or the harness internals. Nothing
