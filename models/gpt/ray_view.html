@@ -226,7 +226,15 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
     }
+    /* when embedded in the harness (iframe), hide the panel's own title + input controls —
+       the harness supplies the label chip and drives playback; keep them for standalone viewing */
+    html.embedded .scene-head > :first-child { display: none; }
+    html.embedded .controls { display: none; }
+    html.embedded .dock { grid-template-rows: 1fr; }
+    html.embedded .metric-panel { display: none; }
+    html.embedded .app { grid-template-columns: 1fr; grid-template-areas: "scene" "dock"; }
   </style>
+  <script>if (window.self !== window.top) document.documentElement.classList.add('embedded');</script>
 </head>
 <body>
   <main class="app">
