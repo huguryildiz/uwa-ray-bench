@@ -260,7 +260,7 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
           <h1>Abyssal Ray Atlas</h1>
           <div class="scenario">Single source · deep sound channel · two finite seamounts · geometric ray-tube TL</div>
         </div>
-        <div class="scene-readout"><strong id="sceneStatus">Tracing canonical fan…</strong><span id="sceneTime">t = 0.00 s</span><br>depth ×5 · orthographic orbit<br><span id="camReadout">cam yaw −0.58 · pitch −0.32 · zoom 0.98×</span></div>
+        <div class="scene-readout"><strong id="sceneStatus">Tracing canonical fan…</strong><span id="sceneTime">t = 0.00 s</span><br>depth ×5 · orthographic orbit<br><span id="camReadout">cam yaw 0.75 · pitch −0.51 · zoom 0.98×</span></div>
       </header>
       <div id="legend-wrap" class="float-wrap" aria-label="Scene legend">
         <div id="legend">
@@ -401,7 +401,7 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
       canonical: null, display: null, metrics: null,
       time: 0, speed: 1, playing: false, dirty: true, plotDirty: true,
       opacity: .26, tlColour: false, computing: true, displayToken: 0,
-      camera: {yaw:-0.58, pitch:-0.32, zoom:0.98},
+      camera: {yaw:0.75, pitch:-0.51, zoom:0.98},
       drag: null, pinch: new Map(),
       fps: 0, frameCounter: 0, fpsStamp: performance.now(), lastFrame: performance.now(),
       canvas: {w:1,h:1,dpr:1}, sectionCanvas:{w:1,h:1,dpr:1}, arrivalCanvas:{w:1,h:1,dpr:1}
@@ -1004,7 +1004,7 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
         case'set_time': if(m.t!=null&&state.display){setPlaying(false); state.time=clamp(m.t,0,1)*state.display.maxTime; $('timeSlider').value=state.time; $('timeOutput').textContent=`${state.time.toFixed(2)} s`; state.dirty=state.plotDirty=true;} break;
       }
     });
-    function resetCamera(){state.camera={yaw:-.58,pitch:-.32,zoom:.98};state.dirty=true;}
+    function resetCamera(){state.camera={yaw:.75,pitch:-.51,zoom:.98};state.dirty=true;}
     $('cameraButton').addEventListener('click',resetCamera);
     $('timeSlider').addEventListener('input',e=>{setPlaying(false);state.time=+e.target.value;$('timeOutput').textContent=`${state.time.toFixed(2)} s`;state.dirty=state.plotDirty=true;});
     $('opacitySlider').addEventListener('input',e=>{state.opacity=+e.target.value/100;$('opacityOutput').textContent=`${e.target.value}%`;state.dirty=true;});
