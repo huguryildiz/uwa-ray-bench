@@ -1,6 +1,6 @@
 # uwa-ray-bench — Project Rules
 
-A five-way LLM benchmark: **Fugu Ultra vs Opus 4.8 (max) vs GPT 5.5 (Extra High) vs
+A five-way LLM benchmark: **Fugu Ultra vs Opus 4.8 (max) vs GPT 5.6 (Sol Ultra) vs
 Gemini 3.1 Pro (High) vs Fable 5 (Max)** — each builds a self-contained 3D underwater acoustic
 ray-propagation viz, scored against a **BELLHOP3D** reference solver (not "ground truth") on a shared
 TL grid. The live roster is `models/*/` (currently `fugu`, `opus`, `gpt`, `gemini`,
@@ -33,7 +33,7 @@ edits are ordinary infra work like any other file in this repo.
                      HARNESS CHROME  ← infra session (this repo's build work)
    ┌────────┬────────┬────────┬────────┬────────┬──────────────┐
    │ Fugu UI│ Opus UI│ GPT UI │Gemini UI│Fable UI│ Reference UI │
-   │(Ultra) │(4.8max)│(5.5 XH)│(3.1 Pro)│(5 Max) │ (infra sess) │
+   │(Ultra) │(4.8max)│(5.6 SU)│(3.1 Pro)│(5 Max) │ (infra sess) │
    └────────┴────────┴────────┴────────┴────────┴──────────────┘
 ```
 

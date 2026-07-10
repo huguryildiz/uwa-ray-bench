@@ -1,7 +1,7 @@
 # Underwater Acoustic Ray-Propagation Benchmark (3D) — Benchmark Spec
 
 **Purpose:** Five-way model comparison — Fugu Ultra vs Opus 4.8 (max reasoning
-effort) vs GPT 5.5 (Extra High) vs Gemini 3.1 Pro High vs Fable 5 Max, all scored
+effort) vs GPT 5.6 (Sol Ultra) vs Gemini 3.1 Pro High vs Fable 5 Max, all scored
 against a BELLHOP3D reference solver (not "ground truth"). The same prompt goes to all five LLMs;
 each produces a self-contained `ray_view.html` that drops into the comparison
 harness as an opaque, isolated `<iframe>`. The BELLHOP3D reference is precomputed
@@ -424,7 +424,7 @@ down the physics the prompt demands.
 ## Harness fit
 
 Six panels are available to the harness: five opaque model `<iframe>`s
-(**Fugu Ultra** | **Opus 4.8 (max)** | **GPT 5.5 (Extra High)** |
+(**Fugu Ultra** | **Opus 4.8 (max)** | **GPT 5.6 (Sol Ultra)** |
 **Gemini 3.1 Pro (High)** | **Fable 5 (Max)**) plus the **BELLHOP3D reference**. The
 harness no longer keeps all six WebGL panels live at once. `harness/harness.js`
 mounts iframes lazily, warms them sequentially to collect `ray_metrics`, caches
@@ -502,7 +502,7 @@ uwa-ray-bench/
 ├── models/
 │   ├── fugu/ray_view.html                # produced by Codex → Fugu Ultra (isolated)
 │   ├── opus/ray_view.html                # produced by a separate Opus 4.8 (max) chat (isolated)
-│   ├── gpt/ray_view.html                 # produced by a separate GPT 5.5 (Extra High) session (isolated)
+│   ├── gpt/ray_view.html                 # produced by a separate GPT 5.6 (Sol Ultra) session (isolated)
 │   ├── gemini/ray_view.html              # produced by a separate Gemini 3.1 Pro (High) session (isolated)
 │   └── fable/ray_view.html               # produced by a separate Fable 5 (Max) session (isolated)
 │
@@ -527,7 +527,7 @@ uwa-ray-bench/
 ```
 
 **Model tiers (orchestration parameter, NOT a prompt change).** The scored matchup
-is **Fugu Ultra vs Opus 4.8 (max) vs GPT 5.5 (Extra High) vs Gemini 3.1 Pro High
+is **Fugu Ultra vs Opus 4.8 (max) vs GPT 5.6 (Sol Ultra) vs Gemini 3.1 Pro High
 vs Fable 5 Max** — best-vs-best, each model run at its own ceiling (each named
 tier is that model's maximal reasoning effort, so the comparison is
 ceiling-vs-ceiling, not a lower tier). The tier only sets how each model is run;
@@ -545,7 +545,7 @@ infra); do not collapse them into one session:
   isolated Opus 4.8 (max) chat** from the verbatim prompt. No sight of the other
   models, the reference, or the harness internals.
 - **GPT model panel** (`models/gpt/ray_view.html`) — produced by a **separate,
-  isolated GPT 5.5 (Extra High) session** from the verbatim prompt. No sight of the
+  isolated GPT 5.6 (Sol Ultra) session** from the verbatim prompt. No sight of the
   other models, the reference, or the harness internals.
 - **Gemini model panel** (`models/gemini/ray_view.html`) — produced by a **separate,
   isolated Gemini 3.1 Pro High session** from the verbatim prompt. No sight of the
@@ -570,7 +570,7 @@ the model panels' internals.
                  HARNESS CHROME  ← infra session (the "final UI" shell)
    ┌────────┬────────┬────────┬────────┬────────┬──────────────┐
    │ Fugu UI│ Opus UI│ GPT UI │Gemini UI│Fable UI│ Reference UI │
-   │(Ultra) │(4.8max)│(5.5 XH)│(3.1 Pro)│(5 Max) │ (Bellhop3D)  │
+   │(Ultra) │(4.8max)│(5.6 SU)│(3.1 Pro)│(5 Max) │ (Bellhop3D)  │
    └────────┴────────┴────────┴────────┴────────┴──────────────┘
     isolated isolated isolated isolated isolated    model-agnostic
 ```

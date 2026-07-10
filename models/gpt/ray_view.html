@@ -1,2514 +1,993 @@
-<!doctype html>
 <!--
-ASSUMPTIONS AND NUMERICAL MODEL
-- Canonical launch fan: elevation -20..+20 deg with 41 beams, azimuth -15..+15 deg with 31 beams, total 1271 rays.
-- Live sliders can change only the elevation and azimuth beam counts. Scenario geometry, SSP, bathymetry, source, receiver, and launch limits stay fixed.
-- Ray integration: arclength Euler steps of 120 m, with direction renormalization each step. Refraction uses dT/ds = -grad(ln c) + T(T.grad(ln c)), so rays bend toward lower sound speed.
-- Surface reflection: pressure-release surface z=0, specular with no energy loss.
-- Seabed reflection: specular reflection about the local 3D bathymetry normal of z-D(x,y)=0. A constant 3.0 dB loss per seabed bounce is used as a light half-space approximation for c=1600 m/s, rho=1.8 g/cc, alpha=0.5 dB/lambda at representative grazing angles.
-- Transmission loss: geometric-spreading ray-tube approximation, TL = 20 log10(path length in m) + boundary losses. Full wave, diffraction, phase, and caustic corrections are not implemented; path length is clamped at 1 m so caustics stay finite.
-- TL comparison grid / voxel mask: 101 x 49 x 31 nodes over x=0..50 km, y=0..24 km, z=0..3000 m, row-major x-fastest. A grid node is reached when a traced sample passes within 650 m; the deposited TL includes a small near-cell distance penalty.
-- Shadow cutoff: a voxel is "shadow" when TL > 112 dB or no ray deposits energy to that node.
-- Receiver eigenray tolerance: a traced ray connects S to R when its closest approach is <= 250 m. The reported arrival time and TL use the closest sampled segment.
-- Reciprocity check: re-traces a fan centered from R back toward S and compares the best TL at S to the canonical S-to-R best TL.
-- Convergence check: re-traces at 82 x 62 beams on the same TL grid and reports changes in insonified fraction and TL(R). It is a geometric-ray convergence check, not a Bellhop comparison.
+ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is seconds)
+1. Canonical launch grid is 41 elevation beams (-20..+20 deg, inclusive) by 31 azimuth beams
+   (-15..+15 deg, inclusive): 1,271 rays. Positive elevation points downward because z is positive
+   downward; positive azimuth points toward +y. The convergence run literally doubles the beam
+   counts to 82 x 62 = 5,084 rays over the same fixed angular limits.
+2. Rays obey dr/dt=c(z)u and du/dt=-(I-uu^T)grad(c), integrated with a normalized midpoint RK2
+   step of 0.025 s. Common-time path samples are retained every 0.25 s; exact boundary contacts are
+   retained separately for display and segment-distance tests. Runs stop at 72 s, 18 boundary
+   contacts, or on leaving the water domain.
+3. Surface z=0 is pressure-release, specular, and lossless in magnitude (phase reversal is ignored
+   by this incoherent geometric-acoustics display). Seabed contacts are located by a segment root,
+   then reflected about the full analytic 3D normal n=normalize(-Dx,-Dy,1); a 0.25 m water-side
+   nudge prevents numerical re-entry. Rays are never propagated inside the seabed.
+4. Seabed loss uses the incidence-dependent fluid-fluid Rayleigh pressure coefficient for the
+   canonical half-space c2=1600 m/s, rho2=1.8 g/cc. Water density is assumed 1.025 g/cc. The stated
+   alpha=0.5 dB/lambda is represented by a 0.5 dB one-wavelength absorption allowance per seabed
+   contact, added to -20 log10|R|. Surface contacts add 0 dB.
+5. TL is a geometric-spreading approximation relative to 1 m. At common travel time, neighboring
+   elevation/azimuth rays estimate the ray-tube Jacobian Q=|u dot (dr/de x dr/da)|/cos(e0).
+   TL=10 log10(Q/1 m^2)+boundary loss. Tubes whose reflection topology differs fall back to
+   spherical spreading. No full-wave or caustic correction is attempted; Q is clamped to at least
+   max(1 m^2,0.01 s_path^2), limiting caustic gain to 20 dB above spherical spreading, and all TL
+   samples are kept finite.
+6. The static comparison/coverage grid is exactly 101 x 49 x 31 over the full domain: dx=500 m,
+   dy=500 m, dz=100 m, index=ix + 101*(iy + 49*iz) (x fastest), 153,419 Float32 samples.
+   A water node is reached when a traced ray-tube sample covers it and its strongest deposited TL
+   is <=110 dB. Tube capture radius is max(260 m, min(700 m, 230 m + 1.15*sqrt(Q*dOmega/pi)));
+   node and midpoint must both remain above the seabed. Unreached water is 160 dB; sub-seabed
+   nodes are 180 dB. Coverage fractions use water nodes only. The mask is computed once after each
+   fan trace, never per animation frame. This model has no diffraction, so geometric shadows remain.
+7. Receiver/eigenray capture tolerance is 350 m Euclidean distance to a continuous ray segment
+   (approximately half the comparison-voxel diagonal), not merely a stored sample. Adjacent
+   candidates with the same reflection topology and arrival times within 0.12 s are clustered;
+   distinct arrival intensities are summed incoherently for TL(R). If none connect, TL(R)=160 dB.
+8. Reciprocity is an actual second canonical trace from fixed R toward -x with S as target.
+   Snell invariant I=sqrt(ux^2+uy^2)/c is checked on each uninterrupted refracting leg and reset
+   after sloped-seabed reflection, where physics can change it. Out-of-plane distance is measured
+   from each ray's own initial vertical azimuth plane, not from y=12 km.
+9. Rendering alone uses 5x vertical exaggeration for legibility; physics and all metrics remain in
+   physical coordinates. The orbit view is orthographic: parallel box edges remain parallel, and
+   the eight volume corners are auto-fitted after every rotation. The 3D coverage cloud is a
+   deterministic visual subsample of the complete grid. Canonical metric values remain canonical
+   while beam sliders are flagged off-canonical.
 -->
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>3D Ocean Acoustic Ray View</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <link rel="icon" href="data:,">
+  <title>Abyssal Ray Atlas</title>
   <style>
     :root {
       color-scheme: dark;
-      --panel: rgba(6, 14, 24, 0.58);
-      --panel-strong: rgba(5, 12, 22, 0.82);
-      --line: rgba(143, 211, 232, 0.28);
-      --text: #e8f8ff;
+      /* CommSysLab dark-glass / neon-signal theme — aligned with the shared harness + GPT panel tokens */
+      --ink: #e8f8ff;
       --muted: #9dc8d4;
+      --faint: #5f8496;
+      --water-0: #0a2033;
+      --water-1: #071829;
+      --water-2: #020713;
+      --panel: rgba(6, 14, 24, 0.58);
+      --panel-2: rgba(9, 26, 41, 0.68);
+      --line: rgba(143, 211, 232, 0.28);
+      --sand: #2bb6d6;
+      --sand-hi: #52e4ff;
       --cyan: #52e4ff;
-      --green: #6dff9d;
-      --red: #ff5b6c;
-      --sand: #b5aa69;
-      --status-clearance: 72px;
-      --metrics-max-height: none;
+      --good: #6dff9d;
+      --bad: #ff5b6c;
+      --focus: #52e4ff;
+      --ease: cubic-bezier(.22,1,.36,1);
     }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    html,
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; min-width: 0; min-height: 100%; background: var(--water-2); }
     body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
+      min-height: 100svh;
       overflow: hidden;
-      background: #020713;
-      color: var(--text);
+      color: var(--ink);
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      line-height: 1.35;
+      font-variant-numeric: tabular-nums;
     }
-
-    #app {
-      position: fixed;
-      inset: 0;
-      background: #020713;
-    }
-
-    #scene {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      display: block;
-      cursor: grab;
-      touch-action: none;
-    }
-
-    #scene:active {
-      cursor: grabbing;
-    }
-
-    .topbar {
-      position: absolute;
-      top: 12px;
-      left: 12px;
-      right: 12px;
-      display: grid;
-      grid-template-columns: minmax(320px, 720px) minmax(250px, 320px);
-      gap: 8px;
-      align-items: start;
-      justify-content: space-between;
-      pointer-events: none;
-    }
-
-    .panel {
-      pointer-events: auto;
+    button, input, select { font: inherit; }
+    button, select {
+      min-height: 38px;
+      color: var(--ink);
       border: 1px solid var(--line);
-      background: linear-gradient(180deg, rgba(9, 26, 41, 0.68), var(--panel));
-      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
-      backdrop-filter: blur(10px);
-      border-radius: 8px;
+      background: rgba(9, 26, 41, 0.55);
+      border-radius: 6px;
+      padding: 0 12px;
+      cursor: pointer;
+      transition: transform 130ms var(--ease), border-color 220ms var(--ease), background 220ms var(--ease);
     }
-
-    .panel-toggle {
-      width: 24px;
-      min-width: 24px;
-      height: 24px;
-      min-height: 24px;
-      padding: 0;
-      border-radius: 7px;
-      color: #bff3ff;
-      font: 900 14px/1 ui-sans-serif, system-ui, sans-serif;
+    button:hover, select:hover { border-color: color-mix(in srgb, var(--cyan) 55%, var(--line)); background: rgba(16, 42, 64, 0.7); }
+    button:active { transform: scale(.97); }
+    button:focus-visible, select:focus-visible, input:focus-visible, canvas:focus-visible {
+      outline: 3px solid var(--focus); outline-offset: 2px;
     }
-
-    .is-minimized {
-      width: max-content;
-      min-width: 0;
-      max-width: none;
-      padding: 6px;
-    }
-
-    .is-minimized .minimizable-body {
-      display: none;
-    }
-
-    .float-wrap{position:absolute;z-index:3;pointer-events:all;touch-action:none;cursor:grab}
-    .float-wrap.dragging{cursor:grabbing}
-    .float-min{position:absolute;top:4px;right:4px;z-index:4;pointer-events:all;
-      background:rgba(20,35,62,.5);color:#7a82a6;border:1px solid rgba(100,140,255,.18);
-      border-radius:6px;width:17px;height:17px;padding:0;font-size:10px;font-weight:600;line-height:1;
-      cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
-    .float-min:hover{border-color:rgba(150,210,255,.34);color:#eaeefc}
-    .float-wrap.collapsed{width:auto!important;height:auto!important}
-    .float-wrap.collapsed>*:not(.float-min){display:none}
-    .float-wrap.collapsed .float-min{position:static;width:auto;height:20px;padding:0 8px;
-      font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;border-radius:8px;
-      background:rgba(20,26,60,.7);backdrop-filter:blur(18px)}
-
-    .controls {
-      padding: 6px;
-      display: flex;
-      gap: 6px;
-      align-items: flex-start;
-    }
-
-    .controls.is-minimized {
-      width: max-content;
-    }
-
-    .controls-body {
+    button.primary { background: var(--sand); border-color: var(--sand-hi); color: #04121c; font-weight: 750; }
+    button[aria-pressed="true"] { background: rgba(82,228,255,.22); border-color: var(--cyan); }
+    .app {
+      height: 100svh;
+      min-height: 620px;
       display: grid;
-      grid-template-columns: repeat(8, minmax(0, auto));
-      gap: 6px;
-      align-items: center;
+      grid-template-columns: minmax(0, 1fr) clamp(306px, 23vw, 348px);
+      grid-template-rows: minmax(390px, 1fr) clamp(226px, 28vh, 268px);
+      grid-template-areas: "scene metrics" "dock metrics";
+      background:
+        radial-gradient(circle at 21% 0%, rgba(40, 118, 160, .22), transparent 31%),
+        linear-gradient(180deg, var(--water-1), var(--water-2));
     }
-
-    .controls.is-minimized .controls-body {
-      display: none;
+    .scene-shell { grid-area: scene; position: relative; min-width: 0; overflow: hidden; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    #scene { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+    #scene.dragging { cursor: grabbing; }
+    .scene-head {
+      position: absolute; inset: 0 0 auto 0; z-index: 2; pointer-events: none;
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 18px;
+      padding: clamp(14px, 2vw, 24px);
+      background: linear-gradient(180deg, rgba(2, 7, 19, .86), transparent);
     }
-
-    button,
-    select {
-      appearance: none;
-      border: 1px solid rgba(117, 209, 237, 0.34);
-      background: rgba(18, 48, 69, 0.82);
-      color: var(--text);
-      border-radius: 7px;
-      min-height: 28px;
-      padding: 0 8px;
-      font: 700 11px/1 ui-sans-serif, system-ui, sans-serif;
-      letter-spacing: 0;
+    .title-kicker { color: var(--sand-hi); text-transform: uppercase; letter-spacing: .19em; font-size: 10px; font-weight: 800; }
+    h1 { margin: 3px 0 0; font: 700 clamp(22px, 2.6vw, 36px)/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: -.02em; }
+    .scenario { max-width: 360px; margin-top: 7px; color: var(--muted); font-size: 11px; }
+    .scene-readout { text-align: right; color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+    .scene-readout strong { display: block; color: var(--ink); font-size: 12px; letter-spacing: .02em; }
+    .legend {
+      position: absolute; left: clamp(10px, 2vw, 16px); bottom: 14px; z-index: 2;
+      display: flex; flex-direction: column; gap: 5px 0;
+      padding: 8px 11px; border: 1px solid rgba(100, 140, 255, .18); border-radius: 8px;
+      background: rgba(8, 14, 26, .72); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+      color: #cfe3ff; font-size: 11px; letter-spacing: .01em;
     }
-
-    button:hover,
-    select:hover {
-      border-color: rgba(114, 231, 255, 0.72);
-      background: rgba(27, 74, 102, 0.92);
+    .legend span { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+    .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex-shrink: 0; background: var(--cyan); }
+    .swatch.water { background: linear-gradient(135deg, #28768a, #06121f); }
+    .swatch.bed { background: #b08c5a; }
+    .swatch.rays { background: linear-gradient(135deg, #ef735f, #e9c46a, #69c6b8, #6298d3); }
+    .swatch.shadow { background: #050d17; border: 1px solid #335063; }
+    .swatch.s, .swatch.r { border-radius: 50%; }
+    .swatch.s { background: #ffd36b; }
+    .swatch.r { background: #9fe8ff; }
+    .metric-panel {
+      grid-area: metrics; min-width: 0; overflow: auto; padding: 18px 18px 28px;
+      background: linear-gradient(180deg, rgba(9, 26, 41, 0.68), rgba(6, 14, 24, 0.72));
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      scrollbar-color: var(--line) transparent;
     }
-
-    button.active {
-      border-color: rgba(109, 255, 157, 0.78);
-      color: #dfffe9;
+    .panel-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+    .panel-title { margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: .16em; color: var(--muted); }
+    .badge { display: inline-flex; align-items: center; min-height: 25px; padding: 0 8px; border: 1px solid var(--good); color: var(--good); font-size: 9px; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; }
+    .badge.off { color: var(--sand-hi); border-color: var(--sand-hi); }
+    .metric-hero { padding: 18px 0 15px; border-bottom: 1px solid var(--line); }
+    .metric-hero .label, .metric-row .label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .09em; }
+    .reach-value { margin-top: 4px; font: 700 28px/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: -.01em; color: var(--good); }
+    .reach-value.bad { color: var(--bad); }
+    .reach-sub { margin-top: 8px; color: var(--muted); }
+    .metric-group { padding: 14px 0; border-bottom: 1px solid var(--line); }
+    .metric-group h3 { margin: 0 0 9px; color: var(--sand-hi); font-size: 10px; text-transform: uppercase; letter-spacing: .13em; }
+    .metric-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: baseline; margin: 5px 0; }
+    .metric-row .value { color: var(--ink); text-align: right; }
+    .arrival-list { margin: 8px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: 11px; }
+    .arrival-list li { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; }
+    .fine-print { color: var(--faint); font-size: 10px; margin-top: 13px; }
+    .dock { grid-area: dock; min-width: 0; display: grid; grid-template-rows: auto 1fr; background: var(--panel); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-right: 1px solid var(--line); }
+    .controls { min-width: 0; display: grid; grid-template-columns: auto minmax(128px, .9fr) minmax(128px, .9fr) minmax(180px, 1.25fr) minmax(126px, .8fr) auto; gap: 10px; align-items: end; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+    .button-cluster { display: grid; grid-template-columns: repeat(2, max-content); gap: 6px; }
+    .button-cluster button { min-height: 34px; padding-inline: 9px; font-size: 11px; }
+    .control { min-width: 0; position: relative; }
+    .control label { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 3px; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .07em; }
+    .control output { color: var(--ink); }
+    input[type="range"] { width: 100%; min-height: 28px; margin: 0; accent-color: var(--sand-hi); cursor: pointer; }
+    .tick-note { position: absolute; top: 37px; color: var(--sand-hi); font-size: 8px; transform: translateX(-50%); pointer-events: none; }
+    .tick-note::before { content: ""; position: absolute; left: 50%; top: -7px; height: 6px; border-left: 1px solid var(--sand-hi); }
+    .speed { display: flex; gap: 4px; }
+    .speed button { min-width: 35px; min-height: 32px; padding: 0 7px; font-size: 10px; }
+    .speed button.active { color: #04121c; background: var(--sand-hi); border-color: var(--sand-hi); }
+    .plots { min-height: 0; display: grid; grid-template-columns: 1.65fr 1fr; }
+    .plot { position: relative; min-width: 0; min-height: 0; }
+    .plot + .plot { border-left: 1px solid var(--line); }
+    .plot canvas { width: 100%; height: 100%; display: block; }
+    .plot-title { position: absolute; left: 12px; top: 8px; z-index: 1; color: var(--ink); font-size: 10px; text-transform: uppercase; letter-spacing: .105em; pointer-events: none; }
+    .loading {
+      position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
+      background: radial-gradient(circle at 42% 36%, #0a2439, #020713 62%);
+      transition: opacity 420ms var(--ease), visibility 420ms;
     }
-
-    .slider {
-      grid-column: span 2;
-      min-width: 116px;
-      display: grid;
-      gap: 2px;
+    .loading.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+    .loading-card { width: min(430px, calc(100vw - 42px)); }
+    .loading-mark { width: 38px; height: 38px; border: 1px solid var(--sand-hi); transform: rotate(45deg); margin-bottom: 25px; animation: sounding 1.8s ease-in-out infinite; }
+    .loading h2 { margin: 0 0 8px; font: 700 26px/1.05 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: -.01em; }
+    .loading p { margin: 0; color: var(--muted); }
+    .progress { height: 2px; margin-top: 22px; background: rgba(143, 211, 232, .18); overflow: hidden; }
+    .progress i { display: block; width: 8%; height: 100%; background: var(--sand-hi); transform-origin: left; transition: width 180ms linear; }
+    .sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0,0,0,0) !important; white-space: nowrap !important; border: 0 !important; }
+    @keyframes sounding { 0%,100% { transform: rotate(45deg) scale(.82); opacity: .45; } 50% { transform: rotate(45deg) scale(1); opacity: 1; } }
+    @media (max-width: 1179px) {
+      body { overflow: auto; }
+      .app { height: auto; min-height: 100svh; grid-template-columns: 1fr; grid-template-rows: clamp(420px, 58svh, 620px) auto auto; grid-template-areas: "scene" "dock" "metrics"; }
+      .scene-shell, .dock { border-right: 0; }
+      .dock { min-height: 330px; }
+      .metric-panel { overflow: visible; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 0 24px; }
+      .panel-top, .metric-hero { grid-column: 1 / -1; }
+      .controls { grid-template-columns: auto repeat(4, minmax(112px,1fr)) auto; overflow-x: auto; }
     }
-
-    .slider label,
-    .toggle,
-    .speed {
-      color: var(--muted);
-      font: 700 9.5px/1.1 ui-sans-serif, system-ui, sans-serif;
-      letter-spacing: 0;
-      text-transform: uppercase;
+    @media (max-width: 699px) {
+      .app { grid-template-rows: clamp(360px, 55svh, 520px) auto auto; }
+      .scene-head { padding: 14px; }
+      .scenario { display: none; }
+      .legend { max-width: calc(100% - 24px); }
+      .legend span:nth-child(1), .legend span:nth-child(4) { display: none; }
+      .dock { min-height: 720px; grid-template-rows: auto 1fr; }
+      .controls { grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; overflow: visible; align-items: end; }
+      .button-cluster { grid-column: 1 / -1; grid-template-columns: repeat(2, 1fr); }
+      .button-cluster button, button, select { min-height: 44px; }
+      .controls .control:nth-of-type(3), .controls .control:nth-of-type(4) { grid-column: 1 / -1; }
+      .speed { grid-column: 1 / -1; }
+      .speed button { flex: 1; min-height: 44px; }
+      .plots { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; min-height: 420px; }
+      .plot + .plot { border-left: 0; border-top: 1px solid var(--line); }
+      .metric-panel { display: block; padding: 16px 16px 28px; }
     }
-
-    .slider label {
-      display: flex;
-      justify-content: space-between;
-      gap: 8px;
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
     }
-
-    input[type="range"] {
-      width: 100%;
-      accent-color: #58ddff;
-      min-height: 16px;
-    }
-
-    .toggle {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      min-height: 28px;
-      padding: 0 4px;
-      white-space: nowrap;
-    }
-
-    .toggle input {
-      accent-color: #58ddff;
-    }
-
-    .speed {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
-
-    .speed select {
-      min-height: 26px;
-      padding: 0 7px;
-      font-size: 10px;
-    }
-
-    .metrics {
-      justify-self: end;
-      width: min(320px, 100%);
-      padding: 8px;
-      position: relative;
-    }
-
-    .metrics > .panel-toggle {
-      position: absolute;
-      top: 6px;
-      right: 6px;
-      z-index: 2;
-    }
-
-    .metrics .minimizable-body {
-      padding-right: 28px;
-    }
-
-    .metric-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      margin-bottom: 5px;
-    }
-
-    .metric-title {
-      margin: 0;
-      color: #ffffff;
-      font: 800 12px/1.15 ui-sans-serif, system-ui, sans-serif;
-      letter-spacing: 0;
-    }
-
-    .badge {
-      border: 1px solid rgba(109, 255, 157, 0.42);
-      color: var(--green);
-      background: rgba(40, 128, 83, 0.18);
-      border-radius: 999px;
-      padding: 3px 6px;
-      font: 800 9px/1 ui-sans-serif, system-ui, sans-serif;
-      letter-spacing: 0;
-      white-space: nowrap;
-    }
-
-    .badge.off {
-      border-color: rgba(255, 199, 95, 0.5);
-      color: #ffd483;
-      background: rgba(171, 107, 10, 0.22);
-    }
-
-    .metric-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 4px;
-    }
-
-    .metric {
-      min-width: 0;
-      border: 1px solid rgba(116, 192, 216, 0.16);
-      background: rgba(1, 9, 18, 0.34);
-      border-radius: 7px;
-      padding: 5px;
-    }
-
-    .metric span {
-      display: block;
-      color: #8fbaca;
-      font: 700 8.8px/1.05 ui-sans-serif, system-ui, sans-serif;
-      text-transform: uppercase;
-      letter-spacing: 0;
-      margin-bottom: 3px;
-    }
-
-    .metric strong {
-      display: block;
-      overflow-wrap: anywhere;
-      color: #f1fbff;
-      font: 750 10.5px/1.2 ui-sans-serif, system-ui, sans-serif;
-      letter-spacing: 0;
-    }
-
-    .token-kpi {
-      background: linear-gradient(135deg, rgba(35, 116, 146, 0.34), rgba(1, 9, 18, 0.48));
-      border-color: rgba(91, 224, 255, 0.30);
-    }
-
-    .token-kpi strong {
-      color: #eaffff;
-      font-size: 12.5px;
-    }
-
-    .token-kpi small {
-      display: block;
-      margin-top: 3px;
-      color: rgba(188, 229, 238, 0.66);
-      font: 700 9px/1.2 ui-sans-serif, system-ui, sans-serif;
-    }
-
-    .wide {
-      grid-column: span 2;
-    }
-
-    .status {
-      position: absolute;
-      right: 12px;
-      bottom: 12px;
-      max-width: min(400px, calc(100vw - 24px));
-      pointer-events: auto;
-      border: 1px solid rgba(143, 211, 232, 0.22);
-      background: rgba(2, 11, 21, 0.62);
-      border-radius: 8px;
-      padding: 6px 8px;
-      color: #c8edf6;
-      font: 700 10px/1.25 ui-sans-serif, system-ui, sans-serif;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    #xsect-wrap{left:10px;bottom:46px;width:196px;height:119px}
-    #xsect{width:100%;height:100%;border-radius:10px;background:rgba(9,11,30,.75);
-      border:1px solid rgba(100,140,255,.18);backdrop-filter:blur(18px);pointer-events:none;display:block}
-    #legend-wrap{left:10px;bottom:175px}
-    #legend{background:rgba(8,14,26,.72);border:1px solid rgba(100,140,255,.18);border-radius:8px;
-      padding:8px 10px;font:11px -apple-system,sans-serif;color:#cfe3ff;backdrop-filter:blur(18px)}
-    #legend .lg-row{display:flex;align-items:center;gap:8px;padding:3px 0;white-space:nowrap}
-    #legend .lg-sw{width:10px;height:10px;border-radius:2px;flex-shrink:0}
-    #tlbar-wrap{right:16px;top:70px}
-    #tlbar-inner{display:flex;align-items:center;gap:6px;background:rgba(8,14,26,.55);
-      border-radius:8px;padding:8px 10px;backdrop-filter:blur(18px)}
-    #tlbar-inner .tl-col{display:flex;flex-direction:column;align-items:center;gap:4px;
-      font:11px -apple-system,sans-serif;color:#cfe3ff}
-    #tlbar{width:12px;height:150px;border-radius:2px;display:block}
-    #tlbar-inner .tl-side{writing-mode:vertical-rl;transform:rotate(180deg);
-      font:11px -apple-system,sans-serif;color:#cfe3ff}
-
-    @media (max-width: 980px) {
-      .topbar {
-        grid-template-columns: 1fr;
-      }
-
-      .metrics {
-        justify-self: start;
-      }
-
-      .controls {
-        align-items: flex-start;
-      }
-
-      .controls-body {
-        grid-template-columns: repeat(4, minmax(0, auto));
-      }
-
-      .slider {
-        grid-column: span 2;
-      }
-    }
-
-    @media (max-width: 780px) {
-      .status {
-        left: 12px;
-        right: 12px;
-        max-width: none;
-      }
-
-      .metrics {
-        max-height: var(--metrics-max-height);
-        overflow-y: auto;
-      }
-    }
-
-    @media (max-width: 560px) {
-      .topbar {
-        left: 8px;
-        right: 8px;
-        top: 8px;
-      }
-
-      .controls {
-        align-items: flex-start;
-      }
-
-      .controls-body {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
-
-      .slider {
-        grid-column: span 3;
-      }
-
-      #canonicalBtn {
-        grid-column: span 2;
-      }
-
-      button,
-      select {
-        min-width: 0;
-        padding: 0 8px;
-      }
-
-      .metric-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .wide {
-        grid-column: span 2;
-      }
-
-      .status {
-        left: 8px;
-        right: 8px;
-      }
-
-      .status {
-        bottom: 8px;
-      }
-    }
-    /* Harness-controlled clean view: the simulation sidebar owns all controls. */
-    .topbar, #metrics, #statusPanel, #cameraHud { display: none !important; }
   </style>
 </head>
 <body>
-  <div id="app">
-    <canvas id="scene" aria-label="3D acoustic ray propagation visualization"></canvas>
-    <div class="topbar">
-      <div id="controls" class="panel controls" aria-label="Ray view controls">
-        <button class="panel-toggle" type="button" data-minimize-target="controls" aria-label="Minimize controls" aria-expanded="true">−</button>
-        <div class="minimizable-body controls-body">
-          <button id="playBtn" type="button">Play</button>
-          <button id="resetBtn" type="button">Reset</button>
-          <button id="cameraBtn" type="button">Camera</button>
-          <button id="canonicalBtn" type="button">Reset to canonical</button>
-          <button id="arrivalsToggleBtn" class="active" type="button" data-minimize-target="arrivals" aria-pressed="true">Arrivals</button>
-          <button id="sectionToggleBtn" class="active" type="button" data-minimize-target="section" aria-pressed="true">Section</button>
-          <div class="slider">
-            <label for="elevSlider">Elevation beams <output id="elevOut">41</output></label>
-            <input id="elevSlider" type="range" min="11" max="81" step="2" value="41" list="elevTicks">
-            <datalist id="elevTicks">
-              <option value="41" label="canonical"></option>
-            </datalist>
+  <main class="app">
+    <section class="scene-shell" aria-label="Interactive three-dimensional acoustic ray scene">
+      <canvas id="scene" tabindex="0" role="img" aria-label="Three-dimensional ocean volume with refracting acoustic rays, terrain, source, receiver and computed insonified volume"></canvas>
+      <header class="scene-head">
+        <div>
+          <div class="title-kicker">3D refractive acoustic survey</div>
+          <h1>Abyssal Ray Atlas</h1>
+          <div class="scenario">Single source · deep sound channel · two finite seamounts · geometric ray-tube TL</div>
+        </div>
+        <div class="scene-readout"><strong id="sceneStatus">Tracing canonical fan…</strong><span id="sceneTime">t = 0.00 s</span><br>depth ×5 · orthographic orbit</div>
+      </header>
+      <div class="legend" aria-label="Scene legend">
+        <span><i class="swatch water"></i> water</span>
+        <span><i class="swatch bed"></i> seabed</span>
+        <span><i class="swatch rays"></i> launch elevation</span>
+        <span><i class="swatch shadow"></i> shadow = empty</span>
+        <span><i class="swatch s"></i> source S</span>
+        <span><i class="swatch r"></i> receiver R</span>
+      </div>
+    </section>
+
+    <aside class="metric-panel" aria-label="Computed canonical metrics">
+      <div class="panel-top">
+        <div><p class="panel-title">Computed model metrics</p><div class="fine-print" id="rayCountTop">41 × 31 · 1,271 rays</div></div>
+        <span class="badge" id="canonicalBadge">Canonical</span>
+      </div>
+      <section class="metric-hero">
+        <div class="label">Receiver at 40 km · y 9 km · z 1000 m</div>
+        <div class="reach-value" id="reachValue">Computing…</div>
+        <div class="reach-sub" id="reachSub">Continuous segment capture tolerance: 350 m</div>
+      </section>
+      <section class="metric-group">
+        <h3>Coverage · TL ≤ 110 dB</h3>
+        <div class="metric-row"><span class="label">Insonified water</span><span class="value" id="coverageValue">—</span></div>
+        <div class="metric-row"><span class="label">Shadow water</span><span class="value" id="shadowValue">—</span></div>
+      </section>
+      <section class="metric-group">
+        <h3>3D fidelity</h3>
+        <div class="metric-row"><span class="label">Max launch-plane deflection</span><span class="value" id="planeValue">—</span></div>
+        <div class="metric-row"><span class="label">Max Snell drift per leg</span><span class="value" id="snellValue">—</span></div>
+      </section>
+      <section class="metric-group">
+        <h3>Eigenrays & arrivals</h3>
+        <div class="metric-row"><span class="label">Connected paths</span><span class="value" id="eigenCount">—</span></div>
+        <ul class="arrival-list" id="arrivalList"><li><span>Calculating arrivals…</span></li></ul>
+      </section>
+      <section class="metric-group">
+        <h3>Self-checks · run once</h3>
+        <div class="metric-row"><span class="label">Reciprocity error</span><span class="value" id="reciprocityValue">pending</span></div>
+        <div class="metric-row"><span class="label">2× coverage Δ</span><span class="value" id="convergenceCoverage">pending</span></div>
+        <div class="metric-row"><span class="label">2× TL(R) Δ</span><span class="value" id="convergenceTl">pending</span></div>
+        <div class="fine-print" id="convergenceNote">Resolution assessment pending.</div>
+      </section>
+      <section class="metric-group">
+        <h3>Performance</h3>
+        <div class="metric-row"><span class="label">Frame rate</span><span class="value" id="fpsValue">—</span></div>
+        <div class="metric-row"><span class="label">File size</span><span class="value" id="fileSizeValue">—</span></div>
+        <div class="metric-row"><span class="label">Canonical grid</span><span class="value">101 × 49 × 31</span></div>
+      </section>
+      <p class="fine-print">153,419 finite Float32 TL samples · x-fastest · no BELLHOP reference embedded. Canonical metrics remain fixed during exploratory beam-density changes.</p>
+    </aside>
+
+    <section class="dock" aria-label="Playback controls and analysis plots">
+      <div class="controls">
+        <div class="button-cluster">
+          <button class="primary" id="playButton" type="button">Play</button>
+          <button id="resetButton" type="button">Reset</button>
+          <button id="cameraButton" type="button">Camera reset</button>
+          <button id="canonicalButton" type="button">Reset canonical</button>
+        </div>
+        <div class="control">
+          <label for="elevSlider"><span>Elevation beams</span><output id="elevOutput">41</output></label>
+          <input id="elevSlider" type="range" min="11" max="61" step="2" value="41" list="elevTicks">
+          <datalist id="elevTicks"><option value="41" label="canonical"></option></datalist>
+          <span class="tick-note" style="left:60%">41 canonical</span>
+        </div>
+        <div class="control">
+          <label for="azSlider"><span>Azimuth beams</span><output id="azOutput">31</output></label>
+          <input id="azSlider" type="range" min="9" max="51" step="2" value="31" list="azTicks">
+          <datalist id="azTicks"><option value="31" label="canonical"></option></datalist>
+          <span class="tick-note" style="left:52.38%">31 canonical</span>
+        </div>
+        <div class="control">
+          <label for="timeSlider"><span>Travel time · scrub</span><output id="timeOutput">0.00 s</output></label>
+          <input id="timeSlider" type="range" min="0" max="72" step="0.05" value="0">
+        </div>
+        <div class="control">
+          <label for="opacitySlider"><span>Volume opacity</span><output id="opacityOutput">26%</output></label>
+          <input id="opacitySlider" type="range" min="0" max="60" step="1" value="26">
+        </div>
+        <div>
+          <div class="speed" aria-label="Playback speed">
+            <button type="button" data-speed="0.5">½×</button>
+            <button type="button" class="active" data-speed="1">1×</button>
+            <button type="button" data-speed="2">2×</button>
+            <button type="button" data-speed="4">4×</button>
           </div>
-          <div class="slider">
-            <label for="azSlider">Azimuth beams <output id="azOut">31</output></label>
-            <input id="azSlider" type="range" min="9" max="61" step="2" value="31" list="azTicks">
-            <datalist id="azTicks">
-              <option value="31" label="canonical"></option>
-            </datalist>
-          </div>
-          <div class="slider">
-            <label for="timeSlider">Playback time <output id="timeOut">0.0 s</output></label>
-            <input id="timeSlider" type="range" min="0" max="60" step="0.1" value="0">
-          </div>
-          <div class="slider">
-            <label for="opacitySlider">Volume opacity <output id="opacityOut">46%</output></label>
-            <input id="opacitySlider" type="range" min="0" max="100" step="1" value="46">
-          </div>
-          <label class="toggle" for="tlToggle">
-            <input id="tlToggle" type="checkbox">
-            TL colour
-          </label>
-          <label class="speed" for="speedSelect">Speed
-            <select id="speedSelect">
-              <option value="0.25">0.25x</option>
-              <option value="0.5">0.5x</option>
-              <option value="1" selected>1x</option>
-              <option value="2">2x</option>
-              <option value="4">4x</option>
-            </select>
-          </label>
+          <button id="tlToggle" type="button" role="switch" aria-pressed="false" style="width:100%;min-height:30px;margin-top:5px">TL colour: off</button>
         </div>
       </div>
-      <aside id="metrics" class="panel metrics" aria-live="polite">
-        <button class="panel-toggle" type="button" data-minimize-target="metrics" aria-label="Minimize metrics" aria-expanded="true">−</button>
-        <div id="metricsBody" class="minimizable-body"></div>
-      </aside>
-    </div>
-    <div id="statusPanel" class="status">
-      <button class="panel-toggle" type="button" data-minimize-target="status" aria-label="Minimize status" aria-expanded="true">−</button>
-      <span id="status" class="minimizable-body">Preparing canonical ray trace...</span>
-    </div>
-    <div id="xsect-wrap" class="float-wrap">
-      <canvas id="xsect" width="196" height="119"></canvas>
-      <button class="float-min" title="Minimize">–</button>
-    </div>
-    <div id="legend-wrap" class="float-wrap">
-      <div id="legend">
-        <div class="lg-row"><span class="lg-sw" style="background:#ffd36b"></span>source S</div>
-        <div class="lg-row"><span class="lg-sw" style="background:#9fe8ff"></span>receiver R</div>
-        <div class="lg-row"><span class="lg-sw" style="background:#b08c5a"></span>seabed / seamounts</div>
-        <div class="lg-row"><span class="lg-sw" style="background:#6cf"></span>rays (by launch angle)</div>
-        <div class="lg-row"><span class="lg-sw" style="background:#2aa0d0"></span>insonified TL volume</div>
+      <div class="plots">
+        <div class="plot"><span class="plot-title">Centreline y = 12 km · TL cross-section</span><canvas id="section" role="img" aria-label="Centreline range-depth TL cross-section at y equals 12 kilometres"></canvas></div>
+        <div class="plot"><span class="plot-title">Arrivals at fixed receiver R</span><canvas id="arrivals" role="img" aria-label="Arrival time and amplitude stem plot at receiver R"></canvas></div>
       </div>
-      <button class="float-min" title="Minimize">–</button>
-    </div>
-    <div id="tlbar-wrap" class="float-wrap">
-      <div id="tlbar-inner">
-        <div class="tl-col"><span>115</span><canvas id="tlbar" width="12" height="150"></canvas><span>45 dB</span></div>
-        <span class="tl-side">TL (dB)</span>
-      </div>
-      <button class="float-min" title="Minimize">–</button>
+    </section>
+  </main>
+
+  <div class="loading" id="loading" aria-live="polite">
+    <div class="loading-card">
+      <div class="loading-mark" aria-hidden="true"></div>
+      <h2>Sounding the volume</h2>
+      <p id="loadingText">Tracing 1,271 continuously refracting rays…</p>
+      <div class="progress" aria-hidden="true"><i id="loadingProgress"></i></div>
     </div>
   </div>
 
+  <table class="sr-only" id="arrivalTable"><caption>Computed eigenray arrivals</caption><thead><tr><th>Arrival</th><th>Travel time seconds</th><th>Transmission loss dB</th><th>Miss distance metres</th></tr></thead><tbody></tbody></table>
+  <div class="sr-only" aria-live="polite" id="liveStatus">Preparing canonical ray trace.</div>
+
   <script>
-    "use strict";
+  (() => {
+    'use strict';
 
-    const DOMAIN = {
-      xMin: 0,
-      xMax: 50000,
-      yMin: 0,
-      yMax: 24000,
-      zMin: 0,
-      zMax: 3000
-    };
-
-    const SOURCE = { x: 0, y: 12000, z: 50 };
-    const RECEIVER = { x: 40000, y: 9000, z: 1000 };
-
-    const CANONICAL = {
-      elevBeams: 41,
-      azBeams: 31,
-      elevMinDeg: -20,
-      elevMaxDeg: 20,
-      azMinDeg: -15,
-      azMaxDeg: 15,
-      gridNX: 101,
-      gridNY: 49,
-      gridNZ: 31,
-      ds: 120,
-      maxSteps: 760,
-      seabedLossDb: 3.0,
-      shadowCutoffDb: 112,
-      eigenToleranceM: 250,
-      voxelReachRadiusM: 650
-    };
-
-    const GRID = {
-      nx: CANONICAL.gridNX,
-      ny: CANONICAL.gridNY,
-      nz: CANONICAL.gridNZ,
-      dx: (DOMAIN.xMax - DOMAIN.xMin) / (CANONICAL.gridNX - 1),
-      dy: (DOMAIN.yMax - DOMAIN.yMin) / (CANONICAL.gridNY - 1),
-      dz: (DOMAIN.zMax - DOMAIN.zMin) / (CANONICAL.gridNZ - 1)
-    };
-
-    const INF_TL = 999;
-    const RAY_ALPHA = 0.52;
-    const VERTICAL_EXAGGERATION = 3.9;
-    const SEABED_BASE_DEPTH = 2500;
-    const SEAMOUNT_MAX_RISE = 1900;
-    const SESSION_TOKENS_TOTAL = 28672400;
-    const SESSION_TOKEN_COST_USD = 120.39;
-    const SESSION_TOKEN_SOURCE = "local Codex logs, workspace rollouts";
-
-    const canvas = document.getElementById("scene");
-    const ctx = canvas.getContext("2d", { alpha: false });
-    const playBtn = document.getElementById("playBtn");
-    const resetBtn = document.getElementById("resetBtn");
-    const cameraBtn = document.getElementById("cameraBtn");
-    const canonicalBtn = document.getElementById("canonicalBtn");
-    const elevSlider = document.getElementById("elevSlider");
-    const azSlider = document.getElementById("azSlider");
-    const timeSlider = document.getElementById("timeSlider");
-    const opacitySlider = document.getElementById("opacitySlider");
-    const tlToggle = document.getElementById("tlToggle");
-    const speedSelect = document.getElementById("speedSelect");
-    const elevOut = document.getElementById("elevOut");
-    const azOut = document.getElementById("azOut");
-    const timeOut = document.getElementById("timeOut");
-    const opacityOut = document.getElementById("opacityOut");
-    const metricsEl = document.getElementById("metrics");
-    const metricsBodyEl = document.getElementById("metricsBody");
-    const statusEl = document.getElementById("status");
-    const colorbarEl = document.getElementById("tlbar-wrap");
-    const arrivalsToggleBtn = document.getElementById("arrivalsToggleBtn");
-    const sectionToggleBtn = document.getElementById("sectionToggleBtn");
-    const xsectionWrap = document.getElementById("xsect-wrap");
-    const xsectionCanvas = document.getElementById("xsect");
-    const xctx = xsectionCanvas.getContext("2d");
-
-    const CAMERA_HOME = {
-      yaw: -0.73,
-      pitch: 1.08,
-      zoom: 0.91
-    };
-
-    const CAMERA_FRAME = {
-      centerX: 0.50,
-      centerY: 0.50
-    };
-
-    const ORTHOGRAPHIC_PROJECTION_SCALE = 1;
-
-    const camera = {
-      yaw: CAMERA_HOME.yaw,
-      pitch: CAMERA_HOME.pitch,
-      zoom: CAMERA_HOME.zoom,
-      scale: 15,
-      cx: 0,
-      cy: 0
-    };
-
-    const sceneLabelRects = [];
-    const sceneLabelBlockRects = [];
+    const C = Object.freeze({
+      X: 50000, Y: 24000, Z: 3000,
+      S: Object.freeze({x:0, y:12000, z:50}),
+      R: Object.freeze({x:40000, y:9000, z:1000}),
+      EMIN: -20, EMAX: 20, AMIN: -15, AMAX: 15,
+      CE: 41, CA: 31, HE: 82, HA: 62,
+      DT: 0.025, SAMPLE_DT: 0.25, SAMPLE_EVERY: 10, TMAX: 72,
+      MAX_CONTACTS: 18, TOL: 350, TL_CUT: 110, NO_RAY_TL: 160, SOLID_TL: 180,
+      NX: 101, NY: 49, NZ: 31, DX: 500, DY: 500, DZ: 100,
+      STRIDE: 7
+    });
+    const TOTAL = C.NX * C.NY * C.NZ;
+    const R_INDEX = 80 + C.NX * (18 + C.NY * 10);
+    const DEG = Math.PI / 180;
+    const $ = id => document.getElementById(id);
+    const scene = $('scene'), section = $('section'), arrivalsCanvas = $('arrivals');
+    const ctx = scene.getContext('2d', {alpha:false});
+    const sctx = section.getContext('2d', {alpha:false});
+    const actx = arrivalsCanvas.getContext('2d', {alpha:false});
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     const state = {
-      rays: [],
-      field: null,
-      volumePoints: [],
-      seabedMesh: [],
-      crossSection: [],
-      metrics: null,
-      convergence: null,
-      currentTime: 0,
-      maxTime: 60,
-      playing: false,
-      showArrivals: true,
-      showCrossSection: true,
-      lastFrameMs: performance.now(),
-      fps: 0,
-      frameCount: 0,
-      fpsWindowStart: performance.now(),
-      tracing: false,
-      retraceTimer: 0,
-      pointer: null
+      canonical: null, display: null, metrics: null,
+      time: 0, speed: 1, playing: false, dirty: true, plotDirty: true,
+      opacity: .26, tlColour: false, computing: true, displayToken: 0,
+      camera: {yaw:-0.58, pitch:-0.32, zoom:0.98},
+      drag: null, pinch: new Map(),
+      fps: 0, frameCounter: 0, fpsStamp: performance.now(), lastFrame: performance.now(),
+      canvas: {w:1,h:1,dpr:1}, sectionCanvas:{w:1,h:1,dpr:1}, arrivalCanvas:{w:1,h:1,dpr:1}
     };
 
-    function clamp(value, min, max) {
-      return Math.max(min, Math.min(max, value));
-    }
-
-    function smoothstep(edge0, edge1, value) {
-      const t = clamp((value - edge0) / (edge1 - edge0), 0, 1);
-      return t * t * (3 - 2 * t);
-    }
-
-    function lerp(a, b, t) {
-      return a + (b - a) * t;
-    }
-
-    function degToRad(deg) {
-      return deg * Math.PI / 180;
-    }
-
-    function length3(v) {
-      return Math.hypot(v.x, v.y, v.z);
-    }
-
-    function normalize3(v) {
-      const len = length3(v) || 1;
-      return { x: v.x / len, y: v.y / len, z: v.z / len };
-    }
-
-    function dot3(a, b) {
-      return a.x * b.x + a.y * b.y + a.z * b.z;
-    }
-
-    function cross3(a, b) {
-      return {
-        x: a.y * b.z - a.z * b.y,
-        y: a.z * b.x - a.x * b.z,
-        z: a.x * b.y - a.y * b.x
-      };
-    }
-
-    function reflect3(v, n) {
-      const d = dot3(v, n);
-      return normalize3({
-        x: v.x - 2 * d * n.x,
-        y: v.y - 2 * d * n.y,
-        z: v.z - 2 * d * n.z
-      });
-    }
+    const clamp = (v,a,b) => Math.max(a, Math.min(b,v));
+    const lerp = (a,b,t) => a + (b-a)*t;
+    const hypot3 = (x,y,z) => Math.hypot(x,y,z);
+    const comma = n => Math.round(n).toLocaleString('en-US');
+    const finite = (v, fallback=0) => Number.isFinite(v) ? v : fallback;
+    const idx3 = (ix,iy,iz) => ix + C.NX * (iy + C.NY * iz);
+    const yieldMain = () => new Promise(resolve => setTimeout(resolve, 0));
 
     function soundSpeed(z) {
-      if (z <= 200) return 1520 - 0.10 * z;
-      return 1500 + 0.018 * (z - 200);
+      z = clamp(z, 0, C.Z);
+      return z <= 200 ? 1520 - 0.10*z : 1500 + 0.018*(z-200);
+    }
+    function soundGradient(z) { return z < 200 ? -0.10 : 0.018; }
+
+    function bathy(x,y) {
+      const xk=x/1000, yk=y/1000;
+      const q1=((xk-18)/2.5)**2 + ((yk-12)/3.0)**2;
+      const q2=((xk-34)/2.0)**2 + ((yk-9)/2.5)**2;
+      return 2500 - 1500*Math.exp(-q1) - 1900*Math.exp(-q2);
+    }
+    function bathyNormal(x,y) {
+      const xk=x/1000, yk=y/1000;
+      const e1=Math.exp(-(((xk-18)/2.5)**2 + ((yk-12)/3.0)**2));
+      const e2=Math.exp(-(((xk-34)/2.0)**2 + ((yk-9)/2.5)**2));
+      const dx=(2*1500*e1*(xk-18)/(2.5**2) + 2*1900*e2*(xk-34)/(2.0**2))/1000;
+      const dy=(2*1500*e1*(yk-12)/(3.0**2) + 2*1900*e2*(yk-9)/(2.5**2))/1000;
+      const m=Math.hypot(dx,dy,1);
+      return {x:-dx/m, y:-dy/m, z:1/m};
     }
 
-    function soundGradient(z) {
-      return z <= 200 ? -0.10 : 0.018;
-    }
-
-    function bathymetry(x, y) {
-      const xKm = x / 1000;
-      const yKm = y / 1000;
-      const q1 = ((xKm - 18) / 2.5) ** 2 + ((yKm - 12) / 3.0) ** 2;
-      const q2 = ((xKm - 34) / 2.0) ** 2 + ((yKm - 9) / 2.5) ** 2;
-      return 2500 - 1500 * Math.exp(-q1) - 1900 * Math.exp(-q2);
-    }
-
-    function bathymetryGradient(x, y) {
-      const xKm = x / 1000;
-      const yKm = y / 1000;
-      const terms = [
-        { amp: 1500, cx: 18, cy: 12, sx: 2.5, sy: 3.0 },
-        { amp: 1900, cx: 34, cy: 9, sx: 2.0, sy: 2.5 }
-      ];
-      let dx = 0;
-      let dy = 0;
-      for (const term of terms) {
-        const q = ((xKm - term.cx) / term.sx) ** 2 + ((yKm - term.cy) / term.sy) ** 2;
-        const e = Math.exp(-q);
-        dx += term.amp * e * 2 * (xKm - term.cx) / (term.sx * term.sx) / 1000;
-        dy += term.amp * e * 2 * (yKm - term.cy) / (term.sy * term.sy) / 1000;
+    function bottomLossDb(u,n,z) {
+      const ci=clamp(Math.abs(u.x*n.x+u.y*n.y+u.z*n.z), .035, 1);
+      const si=Math.sqrt(Math.max(0,1-ci*ci));
+      const c1=soundSpeed(z), sinT=1600/c1*si;
+      let mag;
+      if (sinT >= 1) mag=1;
+      else {
+        const ct=Math.sqrt(Math.max(0,1-sinT*sinT));
+        const z1=1.025*c1, z2=1.8*1600;
+        mag=Math.abs((z2*ci-z1*ct)/(z2*ci+z1*ct));
       }
-      return { dx, dy };
+      return -20*Math.log10(clamp(mag,.04,1)) + 0.5;
     }
 
-    function seabedNormal(x, y) {
-      const g = bathymetryGradient(x, y);
-      return normalize3({ x: -g.dx, y: -g.dy, z: 1 });
+    function direction(elevDeg, azDeg, reverse=false) {
+      const e=elevDeg*DEG, a=azDeg*DEG, ce=Math.cos(e);
+      return reverse
+        ? {x:-ce*Math.cos(a), y:ce*Math.sin(a), z:Math.sin(e)}
+        : {x: ce*Math.cos(a), y:ce*Math.sin(a), z:Math.sin(e)};
+    }
+    function normalize(u) {
+      const m=Math.hypot(u.x,u.y,u.z)||1;
+      return {x:u.x/m,y:u.y/m,z:u.z/m};
     }
 
-    function tlFromPath(pathLength, boundaryLossDb) {
-      return 20 * Math.log10(Math.max(1, pathLength)) + boundaryLossDb;
+    function closestSegment(a,b,target,t0,t1, update) {
+      const vx=b.x-a.x, vy=b.y-a.y, vz=b.z-a.z;
+      const wx=target.x-a.x, wy=target.y-a.y, wz=target.z-a.z;
+      const den=vx*vx+vy*vy+vz*vz;
+      const q=den>0 ? clamp((wx*vx+wy*vy+wz*vz)/den,0,1) : 0;
+      const dx=a.x+q*vx-target.x, dy=a.y+q*vy-target.y, dz=a.z+q*vz-target.z;
+      const d2=dx*dx+dy*dy+dz*dz;
+      if (d2 < update.d2) { update.d2=d2; update.time=lerp(t0,t1,q); }
     }
 
-    function gridIndex(ix, iy, iz) {
-      return ix + GRID.nx * (iy + GRID.ny * iz);
-    }
+    function traceRay(origin,target,elev,az,reverse) {
+      let x=origin.x,y=origin.y,z=origin.z;
+      let u=direction(elev,az,reverse);
+      let time=0, pathLength=0, loss=0, surfaceBounces=0, bottomBounces=0, contacts=0;
+      let legInvariant=Math.hypot(u.x,u.y)/soundSpeed(z), maxSnell=0, maxPlane=0;
+      const planeN={x:-Math.sin(az*DEG), y:reverse ? -Math.cos(az*DEG) : Math.cos(az*DEG)};
+      const packed=[], events=[];
+      const nearest={d2:Infinity,time:0};
+      const pushSample=()=>packed.push(x,y,z,time,loss,bottomBounces*32+surfaceBounces,pathLength);
+      pushSample();
 
-    function gridPosition(ix, iy, iz) {
+      const steps=Math.ceil(C.TMAX/C.DT);
+      for (let step=1; step<=steps; step++) {
+        const old={x,y,z};
+        const oldTime=time;
+        const c0=soundSpeed(z), g0=soundGradient(z);
+        const du0={x:g0*u.z*u.x, y:g0*u.z*u.y, z:g0*(u.z*u.z-1)};
+        const um=normalize({x:u.x+.5*C.DT*du0.x,y:u.y+.5*C.DT*du0.y,z:u.z+.5*C.DT*du0.z});
+        const zm=z+.5*C.DT*c0*u.z;
+        const cm=soundSpeed(zm), gm=soundGradient(zm);
+        const dum={x:gm*um.z*um.x, y:gm*um.z*um.y, z:gm*(um.z*um.z-1)};
+        let un=normalize({x:u.x+C.DT*dum.x,y:u.y+C.DT*dum.y,z:u.z+C.DT*dum.z});
+        let nx=x+C.DT*cm*um.x, ny=y+C.DT*cm*um.y, nz=z+C.DT*cm*um.z;
+        time=step*C.DT;
+        pathLength+=C.DT*cm;
+
+        const f0=z-bathy(x,y), f1=nz-bathy(nx,ny);
+        let type=null, frac=2;
+        if (nz<0) { type='surface'; frac=clamp(z/(z-nz),0,1); }
+        if (f0<=0 && f1>0) {
+          const bf=clamp(f0/(f0-f1),0,1);
+          if (bf<frac) { type='bottom'; frac=bf; }
+        }
+
+        if (type) {
+          const hit={x:lerp(x,nx,frac),y:lerp(y,ny,frac),z:lerp(z,nz,frac)};
+          hit.z=type==='surface'?0:bathy(hit.x,hit.y);
+          closestSegment(old,hit,target,oldTime,lerp(oldTime,time,frac),nearest);
+          let n;
+          if (type==='surface') { n={x:0,y:0,z:1}; surfaceBounces++; }
+          else { n=bathyNormal(hit.x,hit.y); loss+=bottomLossDb(un,n,hit.z); bottomBounces++; }
+          contacts++;
+          const dot=un.x*n.x+un.y*n.y+un.z*n.z;
+          un=normalize({x:un.x-2*dot*n.x,y:un.y-2*dot*n.y,z:un.z-2*dot*n.z});
+          const remain=C.DT*cm*(1-frac);
+          nx=hit.x+un.x*remain; ny=hit.y+un.y*remain; nz=hit.z+un.z*remain;
+          if (type==='surface') nz=Math.max(.25,nz);
+          else {
+            const nn=bathyNormal(hit.x,hit.y);
+            nx-=nn.x*.25; ny-=nn.y*.25; nz-=nn.z*.25;
+            const floor=bathy(nx,ny)-.05;
+            if (nz>floor) nz=floor;
+            legInvariant=Math.hypot(un.x,un.y)/soundSpeed(nz);
+          }
+          events.push(lerp(oldTime,time,frac),hit.x,hit.y,hit.z,bottomBounces*32+surfaceBounces);
+          closestSegment(hit,{x:nx,y:ny,z:nz},target,lerp(oldTime,time,frac),time,nearest);
+        } else closestSegment(old,{x:nx,y:ny,z:nz},target,oldTime,time,nearest);
+
+        x=nx; y=ny; z=nz; u=un;
+        const inv=Math.hypot(u.x,u.y)/soundSpeed(z);
+        maxSnell=Math.max(maxSnell,Math.abs(inv-legInvariant));
+        const px=x-origin.x, py=y-origin.y;
+        maxPlane=Math.max(maxPlane,Math.abs(px*planeN.x+py*planeN.y));
+
+        if (step%C.SAMPLE_EVERY===0) pushSample();
+        if (contacts>=C.MAX_CONTACTS || x<0 || x>C.X || y<0 || y>C.Y || z>C.Z || z>bathy(x,y)+.1) break;
+      }
+      if (packed[packed.length-C.STRIDE+3]!==time) pushSample();
       return {
-        x: DOMAIN.xMin + ix * GRID.dx,
-        y: DOMAIN.yMin + iy * GRID.dy,
-        z: DOMAIN.zMin + iz * GRID.dz
+        elev, az, samples:new Float32Array(packed), events:new Float32Array(events),
+        minDistance:Math.sqrt(nearest.d2), minTime:nearest.time,
+        maxSnell, maxPlane, endTime:time, tl:null
       };
     }
 
-    function makeDirectionFromFrame(elevRad, azRad, forward) {
-      const f = normalize3(forward);
-      let side = cross3({ x: 0, y: 0, z: 1 }, f);
-      if (length3(side) < 0.0001) side = { x: 0, y: 1, z: 0 };
-      side = normalize3(side);
-      const down = normalize3(cross3(f, side));
-      const ce = Math.cos(elevRad);
-      const se = Math.sin(elevRad);
-      const ca = Math.cos(azRad);
-      const sa = Math.sin(azRad);
-      return normalize3({
-        x: f.x * ce * ca + side.x * ce * sa + down.x * se,
-        y: f.y * ce * ca + side.y * ce * sa + down.y * se,
-        z: f.z * ce * ca + side.z * ce * sa + down.z * se
+    async function traceFan(ne,na,origin,target,reverse,label,token=0) {
+      const rays=new Array(ne*na), elevs=new Float32Array(ne), azs=new Float32Array(na);
+      for(let i=0;i<ne;i++) elevs[i]=lerp(C.EMIN,C.EMAX,ne===1?0:i/(ne-1));
+      for(let j=0;j<na;j++) azs[j]=lerp(C.AMIN,C.AMAX,na===1?0:j/(na-1));
+      let maxTime=0,maxPlane=0,maxSnell=0;
+      for(let i=0;i<ne;i++) for(let j=0;j<na;j++) {
+        if (token && token!==state.displayToken) throw new Error('cancelled');
+        const k=i*na+j, ray=traceRay(origin,target,elevs[i],azs[j],reverse);
+        rays[k]=ray; maxTime=Math.max(maxTime,ray.endTime); maxPlane=Math.max(maxPlane,ray.maxPlane); maxSnell=Math.max(maxSnell,ray.maxSnell);
+        if (k%31===0) {
+          setProgress(label,(k+1)/(ne*na));
+          await yieldMain();
+        }
+      }
+      return {ne,na,elevs,azs,rays,maxTime,maxPlane,maxSnell,reverse,origin,target,field:null,cloud:null,receiver:null};
+    }
+
+    function sampleXYZ(ray,k) {
+      const p=ray.samples, o=k*C.STRIDE;
+      return {x:p[o],y:p[o+1],z:p[o+2]};
+    }
+    function sampleCount(ray) { return ray.samples.length/C.STRIDE; }
+    function sampleDirection(ray,k) {
+      const n=sampleCount(ray), a=sampleXYZ(ray,Math.max(0,k-1)), b=sampleXYZ(ray,Math.min(n-1,k+1));
+      return normalize({x:b.x-a.x,y:b.y-a.y,z:b.z-a.z});
+    }
+    function topology(ray,k) { return ray.samples[k*C.STRIDE+5]; }
+
+    async function computeTubeTl(fan,label,token=0) {
+      const de=(C.EMAX-C.EMIN)*DEG/Math.max(1,fan.ne-1), da=(C.AMAX-C.AMIN)*DEG/Math.max(1,fan.na-1);
+      for(let i=0;i<fan.ne;i++) for(let j=0;j<fan.na;j++) {
+        if (token && token!==state.displayToken) throw new Error('cancelled');
+        const ray=fan.rays[i*fan.na+j], n=sampleCount(ray), tl=new Float32Array(n);
+        const i0=i===0?i:i-1, i1=i===fan.ne-1?i:i+1, j0=j===0?j:j-1, j1=j===fan.na-1?j:j+1;
+        const denE=Math.max(DEG*.001,(fan.elevs[i1]-fan.elevs[i0])*DEG);
+        const denA=Math.max(DEG*.001,(fan.azs[j1]-fan.azs[j0])*DEG);
+        const re0=fan.rays[i0*fan.na+j], re1=fan.rays[i1*fan.na+j];
+        const ra0=fan.rays[i*fan.na+j0], ra1=fan.rays[i*fan.na+j1];
+        for(let k=0;k<n;k++) {
+          const p=ray.samples, o=k*C.STRIDE, s=Math.max(1,p[o+6]), loss=p[o+4];
+          let q=s*s;
+          if (k<sampleCount(re0)&&k<sampleCount(re1)&&k<sampleCount(ra0)&&k<sampleCount(ra1) &&
+              topology(re0,k)===topology(ray,k)&&topology(re1,k)===topology(ray,k)&&topology(ra0,k)===topology(ray,k)&&topology(ra1,k)===topology(ray,k)) {
+            const a=sampleXYZ(re0,k), b=sampleXYZ(re1,k), c=sampleXYZ(ra0,k), d=sampleXYZ(ra1,k);
+            const ex=(b.x-a.x)/denE, ey=(b.y-a.y)/denE, ez=(b.z-a.z)/denE;
+            const ax=(d.x-c.x)/denA, ay=(d.y-c.y)/denA, az=(d.z-c.z)/denA;
+            const cx=ey*az-ez*ay, cy=ez*ax-ex*az, cz=ex*ay-ey*ax;
+            const u=sampleDirection(ray,k);
+            const jac=Math.abs(u.x*cx+u.y*cy+u.z*cz)/Math.max(.25,Math.cos(ray.elev*DEG));
+            if (Number.isFinite(jac)&&jac>0) q=jac;
+          }
+          q=clamp(q,Math.max(1,.01*s*s),25*s*s);
+          tl[k]=clamp(10*Math.log10(q)+loss,0,C.NO_RAY_TL);
+        }
+        ray.tl=tl;
+        const rix=i*fan.na+j;
+        if(rix%43===0){setProgress(label,(rix+1)/(fan.ne*fan.na));await yieldMain();}
+      }
+      fan.deltaOmega=de*da;
+      return fan;
+    }
+
+    function receiverAnalysis(fan) {
+      const candidates=[];
+      let nearest=Infinity;
+      for(let ri=0;ri<fan.rays.length;ri++) {
+        const ray=fan.rays[ri]; nearest=Math.min(nearest,ray.minDistance);
+        if(ray.minDistance<=C.TOL) {
+          const k=clamp(Math.round(ray.minTime/C.SAMPLE_DT),0,ray.tl.length-1);
+          const missPenalty=6*(ray.minDistance/C.TOL)**2;
+          candidates.push({rayIndex:ri,time:ray.minTime,tl:clamp(ray.tl[k]+missPenalty,0,C.NO_RAY_TL),miss:ray.minDistance,topology:topology(ray,k)});
+        }
+      }
+      candidates.sort((a,b)=>a.time-b.time||a.tl-b.tl);
+      const clusters=[];
+      for(const c of candidates) {
+        let found=clusters.find(q=>q.topology===c.topology&&Math.abs(q.time-c.time)<=.12);
+        if(!found) clusters.push({...c});
+        else if(c.tl<found.tl) Object.assign(found,c);
+      }
+      clusters.sort((a,b)=>a.time-b.time);
+      let intensity=0; for(const a of clusters) intensity+=10**(-a.tl/10);
+      const reached=clusters.length>0;
+      return {reached,nearestMiss:nearest,tl:reached?clamp(-10*Math.log10(intensity),0,C.NO_RAY_TL):C.NO_RAY_TL,arrivals:clusters};
+    }
+
+    const waterMask=new Uint8Array(TOTAL);
+    (function buildWaterMask(){
+      for(let iz=0;iz<C.NZ;iz++) for(let iy=0;iy<C.NY;iy++) for(let ix=0;ix<C.NX;ix++) {
+        const x=ix*C.DX,y=iy*C.DY,z=iz*C.DZ;
+        waterMask[idx3(ix,iy,iz)]=z<=bathy(x,y)+.001?1:0;
+      }
+    })();
+
+    async function computeField(fan,label,token=0) {
+      const field=new Float32Array(TOTAL); field.fill(C.NO_RAY_TL);
+      for(let n=0;n<TOTAL;n++) if(!waterMask[n]) field[n]=C.SOLID_TL;
+      const de=(C.EMAX-C.EMIN)*DEG/Math.max(1,fan.ne-1), da=(C.AMAX-C.AMIN)*DEG/Math.max(1,fan.na-1);
+      for(let ri=0;ri<fan.rays.length;ri++) {
+        if(token&&token!==state.displayToken) throw new Error('cancelled');
+        const ray=fan.rays[ri], n=sampleCount(ray), cosE=Math.max(.25,Math.cos(ray.elev*DEG));
+        for(let k=1;k<n;k++) {
+          const o=k*C.STRIDE, x=ray.samples[o],y=ray.samples[o+1],z=ray.samples[o+2],loss=ray.samples[o+4];
+          const tl=ray.tl[k];
+          const q=10**((tl-loss)/10), tube=Math.sqrt(Math.max(0,q*de*da*cosE/Math.PI));
+          const radius=clamp(230+1.15*tube,260,700), r2=radius*radius;
+          const ix0=clamp(Math.floor((x-radius)/C.DX),0,C.NX-1),ix1=clamp(Math.ceil((x+radius)/C.DX),0,C.NX-1);
+          const iy0=clamp(Math.floor((y-radius)/C.DY),0,C.NY-1),iy1=clamp(Math.ceil((y+radius)/C.DY),0,C.NY-1);
+          const iz0=clamp(Math.floor((z-radius)/C.DZ),0,C.NZ-1),iz1=clamp(Math.ceil((z+radius)/C.DZ),0,C.NZ-1);
+          for(let iz=iz0;iz<=iz1;iz++) for(let iy=iy0;iy<=iy1;iy++) for(let ix=ix0;ix<=ix1;ix++) {
+            const id=idx3(ix,iy,iz); if(!waterMask[id]) continue;
+            const gx=ix*C.DX,gy=iy*C.DY,gz=iz*C.DZ,dx=gx-x,dy=gy-y,dz=gz-z,d2=dx*dx+dy*dy+dz*dz;
+            if(d2>r2) continue;
+            const mx=(gx+x)*.5,my=(gy+y)*.5,mz=(gz+z)*.5;
+            if(mz>bathy(mx,my)) continue;
+            const candidate=clamp(tl+4*d2/r2,0,C.NO_RAY_TL);
+            if(candidate<field[id]) field[id]=candidate;
+          }
+        }
+        if(ri%23===0){setProgress(label,(ri+1)/fan.rays.length);await yieldMain();}
+      }
+      let water=0,lit=0;
+      for(let i=0;i<TOTAL;i++) if(waterMask[i]) {water++;if(field[i]<=C.TL_CUT)lit++;}
+      fan.field=field;
+      fan.coverage=lit/water;
+      fan.cloud=buildCoverageCloud(field);
+      return fan;
+    }
+
+    function buildCoverageCloud(field) {
+      const all=[];
+      for(let iz=0;iz<C.NZ;iz++) for(let iy=0;iy<C.NY;iy++) for(let ix=0;ix<C.NX;ix++) {
+        const id=idx3(ix,iy,iz); if(!waterMask[id]||field[id]>C.TL_CUT) continue;
+        const hash=((id*2654435761)>>>0)%17;
+        if(hash<5) all.push({x:ix*C.DX,y:iy*C.DY,z:iz*C.DZ,tl:field[id]});
+      }
+      if(all.length<=9000) return all;
+      const out=[],step=all.length/9000;
+      for(let i=0;i<9000;i++) out.push(all[Math.floor(i*step)]);
+      return out;
+    }
+
+    function setProgress(text,fraction) {
+      $('loadingText').textContent=text;
+      $('loadingProgress').style.width=`${clamp(fraction,0,1)*100}%`;
+      $('sceneStatus').textContent=text.replace(/…$/,'');
+    }
+
+    function updateCanonicalMetrics(partial=false) {
+      const m=state.metrics;if(!m)return;
+      $('reachValue').textContent=m.receiver.reached?'R reached':'R unreached';
+      $('reachValue').classList.toggle('bad',!m.receiver.reached);
+      $('reachSub').textContent=`Nearest miss ${m.receiver.nearestMiss.toFixed(0)} m · TL(R) ${m.receiver.tl>=C.NO_RAY_TL?'≥160':m.receiver.tl.toFixed(1)} dB`;
+      $('coverageValue').textContent=`${(m.coverage*100).toFixed(1)}%`;
+      $('shadowValue').textContent=`${((1-m.coverage)*100).toFixed(1)}%`;
+      $('planeValue').textContent=`${comma(m.maxPlane)} m`;
+      $('snellValue').textContent=`${m.maxSnell.toExponential(2)} s/m`;
+      $('eigenCount').textContent=String(m.receiver.arrivals.length);
+      const ul=$('arrivalList');ul.textContent='';
+      const tbody=$('arrivalTable').querySelector('tbody');tbody.textContent='';
+      if(!m.receiver.arrivals.length) ul.innerHTML='<li><span>None within 350 m tolerance</span></li>';
+      m.receiver.arrivals.slice(0,8).forEach((a,i)=>{
+        const li=document.createElement('li');li.innerHTML=`<span>#${i+1} · ${a.time.toFixed(3)} s</span><span>${a.tl.toFixed(1)} dB</span>`;ul.appendChild(li);
+        const tr=document.createElement('tr');tr.innerHTML=`<td>${i+1}</td><td>${a.time.toFixed(5)}</td><td>${a.tl.toFixed(3)}</td><td>${a.miss.toFixed(2)}</td>`;tbody.appendChild(tr);
       });
-    }
-
-    function segmentClosest(a, b, p) {
-      const ab = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
-      const ap = { x: p.x - a.x, y: p.y - a.y, z: p.z - a.z };
-      const len2 = dot3(ab, ab) || 1;
-      const u = clamp(dot3(ap, ab) / len2, 0, 1);
-      const q = {
-        x: a.x + ab.x * u,
-        y: a.y + ab.y * u,
-        z: a.z + ab.z * u
-      };
-      return {
-        u,
-        point: q,
-        dist: Math.hypot(q.x - p.x, q.y - p.y, q.z - p.z)
-      };
-    }
-
-    function traceRay(origin, direction, options) {
-      const ds = options.ds || CANONICAL.ds;
-      const maxSteps = options.maxSteps || CANONICAL.maxSteps;
-      const store = options.store !== false;
-      const points = store ? [] : null;
-      let pos = { x: origin.x, y: origin.y, z: origin.z };
-      let dir = normalize3(direction);
-      let pathLength = 0;
-      let travelTime = 0;
-      let bedBounces = 0;
-      let surfaceBounces = 0;
-      let boundaryLossDb = 0;
-      const initialSnell = Math.hypot(dir.x, dir.y) / soundSpeed(pos.z);
-      let maxSnellDrift = 0;
-
-      if (store) {
-        points.push({
-          x: pos.x,
-          y: pos.y,
-          z: pos.z,
-          t: travelTime,
-          s: pathLength,
-          tl: 0
-        });
+      if(m.reciprocity!==undefined) $('reciprocityValue').textContent=m.reciprocity===null?'N/A · one direction unreached':`${m.reciprocity.toFixed(2)} dB`;
+      if(m.convergence) {
+        $('convergenceCoverage').textContent=`${m.convergence.coverageDeltaPp>=0?'+':''}${m.convergence.coverageDeltaPp.toFixed(2)} pp`;
+        $('convergenceTl').textContent=m.convergence.tlDelta===null?'N/A · reachability changed':`${m.convergence.tlDelta>=0?'+':''}${m.convergence.tlDelta.toFixed(2)} dB`;
+        $('convergenceNote').textContent=m.convergence.underResolved?'Canonical fan is resolution-sensitive at R.':'Canonical fan is stable at the stated thresholds.';
       }
+      $('fileSizeValue').textContent=`${m.fileSizeKB.toFixed(1)} KB`;
+      state.plotDirty=true;state.dirty=true;
+      if(!partial) $('liveStatus').textContent=`Canonical trace complete. Receiver ${m.receiver.reached?'reached':'unreached'}, ${m.receiver.arrivals.length} eigenray arrivals.`;
+    }
 
-      let previous = { x: pos.x, y: pos.y, z: pos.z };
-      for (let step = 0; step < maxSteps; step += 1) {
-        previous = { x: pos.x, y: pos.y, z: pos.z };
-        const c = soundSpeed(pos.z);
-        const gradLnCz = soundGradient(pos.z) / c;
-        const dotGrad = dir.z * gradLnCz;
-        dir = normalize3({
-          x: dir.x + (dir.x * dotGrad) * ds,
-          y: dir.y + (dir.y * dotGrad) * ds,
-          z: dir.z + (-gradLnCz + dir.z * dotGrad) * ds
-        });
+    function makePayload() {
+      const m=state.metrics, f=state.canonical.field;
+      return {
+        type:'ray_metrics', canonical:true, offCanonical:false,
+        reached:m.receiver.reached, nearestRayMissM:m.receiver.nearestMiss, tlRDb:m.receiver.tl,
+        reachability:{reached:m.receiver.reached,nearestMissM:m.receiver.nearestMiss,tlDb:m.receiver.tl,toleranceM:C.TOL},
+        coverage:{insonifiedFraction:m.coverage,shadowFraction:1-m.coverage,cutoffDb:C.TL_CUT},
+        insonifiedFraction:m.coverage, shadowFraction:1-m.coverage,
+        fidelity:{maxOutOfPlaneM:m.maxPlane,maxSnellInvariantDrift:m.maxSnell},
+        maxOutOfPlaneDeflectionM:m.maxPlane,maxSnellInvariantDrift:m.maxSnell,
+        performance:{fps:state.fps,fileSizeKB:m.fileSizeKB,elevationBeams:C.CE,azimuthBeams:C.CA,rayCount:C.CE*C.CA},
+        eigenrays:{count:m.receiver.arrivals.length,arrivals:m.receiver.arrivals.map(a=>({travelTimeS:a.time,tlDb:a.tl,missM:a.miss,rayIndex:a.rayIndex}))},
+        reciprocityErrorDb:m.reciprocity,
+        convergence:m.convergence,
+        tlFieldShape:[C.NX,C.NY,C.NZ],
+        tlFieldOrder:'ix + 101 * (iy + 49 * iz)',
+        tlField:f
+      };
+    }
 
-        const midZ = clamp(pos.z + dir.z * ds * 0.5, 0, DOMAIN.zMax);
-        pos = {
-          x: pos.x + dir.x * ds,
-          y: pos.y + dir.y * ds,
-          z: pos.z + dir.z * ds
+    async function initialise() {
+      try {
+        setProgress('Tracing 1,271 canonical refracting rays…',.01);
+        const fan=await traceFan(C.CE,C.CA,C.S,C.R,false,'Tracing canonical fan…');
+        await computeTubeTl(fan,'Estimating canonical ray-tube divergence…');
+        fan.receiver=receiverAnalysis(fan);
+        await computeField(fan,'Rasterising canonical 3D TL field…');
+        if(fan.receiver.reached) fan.field[R_INDEX]=Math.min(fan.field[R_INDEX],fan.receiver.tl);
+        state.canonical=state.display=fan;
+        let serialised='<!doctype html>\n'+document.documentElement.outerHTML;
+        for(const node of document.childNodes) if(node.nodeType===Node.COMMENT_NODE) serialised=`<!--${node.data}-->\n`+serialised;
+        const nav=performance.getEntriesByType('navigation')[0];
+        const fileSizeKB=((nav&&nav.decodedBodySize)||new Blob([serialised]).size)/1024;
+        state.metrics={receiver:fan.receiver,coverage:fan.coverage,maxPlane:fan.maxPlane,maxSnell:fan.maxSnell,fileSizeKB,reciprocity:undefined,convergence:null};
+        $('timeSlider').max=fan.maxTime.toFixed(2);
+        updateCanonicalMetrics(true);
+        $('loading').classList.add('hidden');
+        $('sceneStatus').textContent='Canonical field ready · self-checking';
+        state.computing=false; state.dirty=state.plotDirty=true;
+
+        setProgress('Retracing R → S for reciprocity…',.01);
+        const reverse=await traceFan(C.CE,C.CA,C.R,C.S,true,'Reciprocity trace R → S…');
+        await computeTubeTl(reverse,'Evaluating reciprocal ray tubes…');
+        reverse.receiver=receiverAnalysis(reverse);
+        state.metrics.reciprocity=(fan.receiver.reached&&reverse.receiver.reached)?Math.abs(fan.receiver.tl-reverse.receiver.tl):null;
+        updateCanonicalMetrics(true);
+
+        setProgress('Tracing literal 82 × 62 convergence fan…',.01);
+        const high=await traceFan(C.HE,C.HA,C.S,C.R,false,'Convergence trace 82 × 62…');
+        await computeTubeTl(high,'Evaluating 2× ray-tube divergence…');
+        high.receiver=receiverAnalysis(high);
+        await computeField(high,'Rasterising 2× convergence field…');
+        const tlDelta=(fan.receiver.reached&&high.receiver.reached)?high.receiver.tl-fan.receiver.tl:null;
+        const underResolved=tlDelta===null||Math.abs(tlDelta)>3||Math.abs(high.coverage-fan.coverage)>.02;
+        state.metrics.convergence={
+          elevationBeams:C.HE,azimuthBeams:C.HA,rayCount:C.HE*C.HA,
+          insonifiedFractionDelta:high.coverage-fan.coverage,
+          coverageDeltaPp:(high.coverage-fan.coverage)*100,
+          tlRDeltaDb:tlDelta,tlDelta,
+          underResolved,assessment:underResolved?'canonical fan is resolution-sensitive':'canonical fan is stable',
+          canonicalReached:fan.receiver.reached,highResolutionReached:high.receiver.reached
         };
-        pathLength += ds;
-        travelTime += ds / soundSpeed(midZ);
-
-        if (pos.z < 0) {
-          pos.z = -pos.z;
-          dir.z = Math.abs(dir.z);
-          surfaceBounces += 1;
-        }
-
-        const inHorizontalBounds = pos.x >= DOMAIN.xMin - 500 &&
-          pos.x <= DOMAIN.xMax + 500 &&
-          pos.y >= DOMAIN.yMin - 500 &&
-          pos.y <= DOMAIN.yMax + 500;
-
-        if (inHorizontalBounds) {
-          const bed = bathymetry(pos.x, pos.y);
-          if (pos.z > bed) {
-            const normal = seabedNormal(pos.x, pos.y);
-            dir = reflect3(dir, normal);
-            pos.z = Math.max(2, bed - 8);
-            bedBounces += 1;
-            boundaryLossDb += CANONICAL.seabedLossDb;
-          }
-        }
-
-        const snell = Math.hypot(dir.x, dir.y) / soundSpeed(clamp(pos.z, 0, DOMAIN.zMax));
-        maxSnellDrift = Math.max(maxSnellDrift, Math.abs(snell - initialSnell));
-
-        if (store) {
-          points.push({
-            x: pos.x,
-            y: pos.y,
-            z: pos.z,
-            t: travelTime,
-            s: pathLength,
-            tl: tlFromPath(pathLength, boundaryLossDb)
-          });
-        }
-
-        if (pos.x < DOMAIN.xMin - 1000 || pos.x > DOMAIN.xMax + 1000 ||
-            pos.y < DOMAIN.yMin - 1500 || pos.y > DOMAIN.yMax + 1500 ||
-            pos.z > DOMAIN.zMax + 600) {
-          break;
-        }
-
-        if (Math.hypot(pos.x - previous.x, pos.y - previous.y, pos.z - previous.z) < 0.01) {
-          break;
-        }
+        updateCanonicalMetrics(false);
+        $('sceneStatus').textContent='Canonical · 1,271 rays';
+        document.body.dataset.ready='true';
+        window.__rayDebug={constants:C,state,metrics:state.metrics,payload:makePayload(),soundSpeed,bathy};
+        window.parent.postMessage(makePayload(),'*');
+      } catch(err) {
+        console.error(err);
+        $('loadingText').textContent=`Model error: ${err.message}`;
+        $('sceneStatus').textContent='Model error';
       }
+    }
 
-      return {
-        points,
-        end: pos,
-        travelTime,
-        pathLength,
-        bedBounces,
-        surfaceBounces,
-        boundaryLossDb,
-        maxSnellDrift
+    function resizeCanvas(canvas,slot) {
+      const r=canvas.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2);
+      const w=Math.max(1,Math.round(r.width)),h=Math.max(1,Math.round(r.height));
+      if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);state[slot]={w,h,dpr};state.dirty=state.plotDirty=true;}
+    }
+    new ResizeObserver(()=>{resizeCanvas(scene,'canvas');resizeCanvas(section,'sectionCanvas');resizeCanvas(arrivalsCanvas,'arrivalCanvas');}).observe(document.body);
+    resizeCanvas(scene,'canvas');resizeCanvas(section,'sectionCanvas');resizeCanvas(arrivalsCanvas,'arrivalCanvas');
+
+    let projectionFrame=null;
+    function world(p) { return {x:(p.x-25000)/25000*1.55,y:(1500-p.z)/1500*.55,z:(p.y-12000)/12000*.75}; }
+    function rotateWorld(q) {
+      const c=state.camera,cy=Math.cos(c.yaw),sy=Math.sin(c.yaw),cp=Math.cos(c.pitch),sp=Math.sin(c.pitch);
+      const x=cy*q.x+sy*q.z,depth0=-sy*q.x+cy*q.z;
+      return {x,y:cp*q.y-sp*depth0,depth:sp*q.y+cp*depth0};
+    }
+    function prepareProjection() {
+      const corners=[];
+      for(const x of [0,C.X]) for(const y of [0,C.Y]) for(const z of [0,C.Z]) corners.push(rotateWorld(world({x,y,z})));
+      let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+      for(const p of corners){minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);}
+      const {w,h}=state.canvas,compact=w<500;
+      const pad={l:compact?28:66,r:compact?28:58,t:compact?96:112,b:compact?66:74};
+      const availableW=Math.max(80,w-pad.l-pad.r),availableH=Math.max(80,h-pad.t-pad.b);
+      const fit=Math.min(availableW/Math.max(.001,maxX-minX),availableH/Math.max(.001,maxY-minY));
+      projectionFrame={
+        midX:(minX+maxX)/2,midY:(minY+maxY)/2,
+        centreX:pad.l+availableW/2,centreY:pad.t+availableH/2,
+        scale:fit*state.camera.zoom
       };
     }
-
-    function depositSample(field, p, tl) {
-      if (!field) return;
-      if (p.x < DOMAIN.xMin || p.x > DOMAIN.xMax ||
-          p.y < DOMAIN.yMin || p.y > DOMAIN.yMax ||
-          p.z < DOMAIN.zMin || p.z > DOMAIN.zMax) {
-        return;
-      }
-      const ix = Math.round((p.x - DOMAIN.xMin) / GRID.dx);
-      const iy = Math.round((p.y - DOMAIN.yMin) / GRID.dy);
-      const iz = Math.round((p.z - DOMAIN.zMin) / GRID.dz);
-      const rx = Math.ceil(CANONICAL.voxelReachRadiusM / GRID.dx);
-      const ry = Math.ceil(CANONICAL.voxelReachRadiusM / GRID.dy);
-      const rz = Math.ceil(CANONICAL.voxelReachRadiusM / GRID.dz);
-      const x0 = clamp(ix - rx, 0, GRID.nx - 1);
-      const x1 = clamp(ix + rx, 0, GRID.nx - 1);
-      const y0 = clamp(iy - ry, 0, GRID.ny - 1);
-      const y1 = clamp(iy + ry, 0, GRID.ny - 1);
-      const z0 = clamp(iz - rz, 0, GRID.nz - 1);
-      const z1 = clamp(iz + rz, 0, GRID.nz - 1);
-      const r2 = CANONICAL.voxelReachRadiusM * CANONICAL.voxelReachRadiusM;
-
-      for (let kz = z0; kz <= z1; kz += 1) {
-        const gz = DOMAIN.zMin + kz * GRID.dz;
-        const dz = gz - p.z;
-        for (let jy = y0; jy <= y1; jy += 1) {
-          const gy = DOMAIN.yMin + jy * GRID.dy;
-          const dy = gy - p.y;
-          for (let ix2 = x0; ix2 <= x1; ix2 += 1) {
-            const gx = DOMAIN.xMin + ix2 * GRID.dx;
-            const dx = gx - p.x;
-            const d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 <= r2) {
-              const penalty = 20 * Math.log10(1 + Math.sqrt(d2) / CANONICAL.voxelReachRadiusM);
-              const idx = gridIndex(ix2, jy, kz);
-              const candidate = tl + penalty;
-              if (candidate < field[idx]) field[idx] = candidate;
-            }
-          }
-        }
-      }
-    }
-
-    function updateReceiverNearest(ray, target, nearest, eigenrays, tolerance) {
-      const points = ray.points;
-      let best = null;
-      for (let i = 1; i < points.length; i += 1) {
-        const a = points[i - 1];
-        const b = points[i];
-        const close = segmentClosest(a, b, target);
-        const t = lerp(a.t, b.t, close.u);
-        const tl = lerp(a.tl, b.tl, close.u);
-        if (!best || close.dist < best.dist) {
-          best = {
-            dist: close.dist,
-            time: t,
-            tl,
-            point: close.point
-          };
-        }
-      }
-      if (best && best.dist < nearest.dist) {
-        nearest.dist = best.dist;
-        nearest.time = best.time;
-        nearest.tl = best.tl;
-        nearest.rayId = ray.id;
-      }
-      if (best && best.dist <= tolerance) {
-        ray.eigen = true;
-        eigenrays.push({
-          rayId: ray.id,
-          elevDeg: ray.elevDeg,
-          azDeg: ray.azDeg,
-          time: best.time,
-          tl: best.tl,
-          missM: best.dist
-        });
-      }
-    }
-
-    function outOfPlaneDeflection(points, origin, initialDir) {
-      const hLen = Math.hypot(initialDir.x, initialDir.y) || 1;
-      const nx = -initialDir.y / hLen;
-      const ny = initialDir.x / hLen;
-      let max = 0;
-      for (const p of points) {
-        const d = Math.abs((p.x - origin.x) * nx + (p.y - origin.y) * ny);
-        if (d > max) max = d;
-      }
-      return max;
-    }
-
-    function traceFan(elevBeams, azBeams, options = {}) {
-      const started = performance.now();
-      const origin = options.origin || SOURCE;
-      const target = options.target || RECEIVER;
-      const forward = options.forward || { x: 1, y: 0, z: 0 };
-      const store = options.store !== false;
-      const makeField = options.makeField !== false;
-      const ds = options.ds || CANONICAL.ds;
-      const maxSteps = options.maxSteps || CANONICAL.maxSteps;
-      const depositStride = options.depositStride || 1;
-      const rays = [];
-      const field = makeField ? new Float32Array(GRID.nx * GRID.ny * GRID.nz) : null;
-      if (field) field.fill(INF_TL);
-      const eigenrays = [];
-      const nearest = { dist: Infinity, time: 0, tl: INF_TL, rayId: -1 };
-      let rayId = 0;
-      let maxTime = 0;
-      let maxOutOfPlaneM = 0;
-      let maxSnellDrift = 0;
-
-      for (let ie = 0; ie < elevBeams; ie += 1) {
-        const et = elevBeams === 1 ? 0.5 : ie / (elevBeams - 1);
-        const elevDeg = lerp(CANONICAL.elevMinDeg, CANONICAL.elevMaxDeg, et);
-        for (let ia = 0; ia < azBeams; ia += 1) {
-          const at = azBeams === 1 ? 0.5 : ia / (azBeams - 1);
-          const azDeg = lerp(CANONICAL.azMinDeg, CANONICAL.azMaxDeg, at);
-          const dir = makeDirectionFromFrame(degToRad(elevDeg), degToRad(azDeg), forward);
-          const traced = traceRay(origin, dir, { ds, maxSteps, store: true });
-          const ray = {
-            id: rayId,
-            elevDeg,
-            azDeg,
-            color: rayColor(elevDeg, azDeg),
-            initialDir: dir,
-            points: traced.points,
-            bedBounces: traced.bedBounces,
-            surfaceBounces: traced.surfaceBounces,
-            maxSnellDrift: traced.maxSnellDrift,
-            eigen: false
-          };
-
-          if (field) {
-            for (let i = 0; i < ray.points.length; i += depositStride) {
-              const p = ray.points[i];
-              depositSample(field, p, p.tl);
-            }
-          }
-
-          updateReceiverNearest(ray, target, nearest, eigenrays, CANONICAL.eigenToleranceM);
-          maxTime = Math.max(maxTime, traced.travelTime);
-          maxOutOfPlaneM = Math.max(maxOutOfPlaneM, outOfPlaneDeflection(ray.points, origin, dir));
-          maxSnellDrift = Math.max(maxSnellDrift, traced.maxSnellDrift);
-          if (store) rays.push(ray);
-          rayId += 1;
-        }
-      }
-
-      const coverage = computeCoverage(field);
-      const elapsedMs = performance.now() - started;
-      eigenrays.sort((a, b) => a.time - b.time || a.tl - b.tl);
-      const limitedEigenrays = eigenrays.slice(0, 18);
-
-      return {
-        rays,
-        field,
-        maxTime,
-        nearest,
-        eigenrays: limitedEigenrays,
-        rawEigenrayCount: eigenrays.length,
-        coverage,
-        maxOutOfPlaneM,
-        maxSnellDrift,
-        elapsedMs,
-        rayCount: elevBeams * azBeams,
-        elevBeams,
-        azBeams
-      };
-    }
-
-    function computeCoverage(field) {
-      if (!field) {
-        return { reached: 0, shadow: 0, reachedFraction: 0, shadowFraction: 1 };
-      }
-      let reached = 0;
-      for (let i = 0; i < field.length; i += 1) {
-        if (field[i] <= CANONICAL.shadowCutoffDb) reached += 1;
-      }
-      const total = field.length;
-      return {
-        reached,
-        shadow: total - reached,
-        reachedFraction: reached / total,
-        shadowFraction: 1 - reached / total
-      };
-    }
-
-    function rayColor(elevDeg, azDeg) {
-      const hue = lerp(195, 18, (elevDeg - CANONICAL.elevMinDeg) /
-        (CANONICAL.elevMaxDeg - CANONICAL.elevMinDeg));
-      const light = 58 + 8 * Math.sin((azDeg + 15) / 30 * Math.PI);
-      return `hsl(${hue.toFixed(1)} 94% ${light.toFixed(1)}%)`;
-    }
-
-    function tlColor(tl, alpha) {
-      const t = clamp((tl - 45) / (CANONICAL.shadowCutoffDb - 45), 0, 1);
-      const hue = lerp(188, 344, t);
-      const sat = lerp(94, 88, t);
-      const light = lerp(62, 58, t);
-      return `hsla(${hue.toFixed(1)} ${sat.toFixed(1)}% ${light.toFixed(1)}% ${alpha})`;
-    }
-
-    function buildVolumePoints(field) {
-      const points = [];
-      if (!field) return points;
-      for (let iz = 0; iz < GRID.nz; iz += 2) {
-        for (let iy = 0; iy < GRID.ny; iy += 3) {
-          for (let ix = 0; ix < GRID.nx; ix += 3) {
-            const idx = gridIndex(ix, iy, iz);
-            const tl = field[idx];
-            if (tl <= CANONICAL.shadowCutoffDb) {
-              const p = gridPosition(ix, iy, iz);
-              const bed = bathymetry(p.x, p.y);
-              if (p.z <= bed) points.push({ x: p.x, y: p.y, z: p.z, tl });
-            }
-          }
-        }
-      }
-      return points;
-    }
-
-    function buildSeabedMesh() {
-      const cells = [];
-      const nx = 76;
-      const ny = 44;
-      for (let ix = 0; ix < nx - 1; ix += 1) {
-        for (let iy = 0; iy < ny - 1; iy += 1) {
-          const x0 = lerp(DOMAIN.xMin, DOMAIN.xMax, ix / (nx - 1));
-          const x1 = lerp(DOMAIN.xMin, DOMAIN.xMax, (ix + 1) / (nx - 1));
-          const y0 = lerp(DOMAIN.yMin, DOMAIN.yMax, iy / (ny - 1));
-          const y1 = lerp(DOMAIN.yMin, DOMAIN.yMax, (iy + 1) / (ny - 1));
-          const p00 = { x: x0, y: y0, z: bathymetry(x0, y0) };
-          const p10 = { x: x1, y: y0, z: bathymetry(x1, y0) };
-          const p11 = { x: x1, y: y1, z: bathymetry(x1, y1) };
-          const p01 = { x: x0, y: y1, z: bathymetry(x0, y1) };
-          const cx = (x0 + x1) * 0.5;
-          const cy = (y0 + y1) * 0.5;
-          const n = seabedNormal(cx, cy);
-          const g = bathymetryGradient(cx, cy);
-          const slope = clamp(Math.hypot(g.dx, g.dy) * 1.4, 0, 1);
-          const cz = bathymetry(cx, cy);
-          const relief = clamp((SEABED_BASE_DEPTH - cz) / SEAMOUNT_MAX_RISE, 0, 1);
-          const summit = smoothstep(0.56, 0.82, relief);
-          const light = normalize3({ x: -0.55, y: -0.42, z: 0.72 });
-          const directional = clamp(0.5 + 0.5 * dot3(n, light), 0, 1);
-          const shade = clamp(0.30 + 0.36 * directional + 0.12 * relief + 0.07 * slope + 0.16 * summit, 0, 1);
-          cells.push({ points: [p00, p10, p11, p01], shade, relief, slope, summit, cx, cy, cz });
-        }
-      }
-      return cells;
-    }
-
-    function buildCrossSection() {
-      const y = 12000;
-      const samples = [];
-      for (let ix = 0; ix <= 220; ix += 1) {
-        const x = lerp(DOMAIN.xMin, DOMAIN.xMax, ix / 220);
-        samples.push({ x, z: bathymetry(x, y) });
-      }
-      return samples;
-    }
-
-    function computeTlAtPoint(field, point) {
-      if (!field) return INF_TL;
-      const ix = clamp(Math.round((point.x - DOMAIN.xMin) / GRID.dx), 0, GRID.nx - 1);
-      const iy = clamp(Math.round((point.y - DOMAIN.yMin) / GRID.dy), 0, GRID.ny - 1);
-      const iz = clamp(Math.round((point.z - DOMAIN.zMin) / GRID.dz), 0, GRID.nz - 1);
-      return field[gridIndex(ix, iy, iz)];
-    }
-
-    function makeMetrics(trace) {
-      const tlAtR = computeTlAtPoint(trace.field, RECEIVER);
-      const reached = trace.nearest.dist <= CANONICAL.eigenToleranceM || tlAtR <= CANONICAL.shadowCutoffDb;
-      const tlR = reached ? Math.min(trace.nearest.tl, tlAtR) :
-        Math.min(INF_TL, CANONICAL.shadowCutoffDb + Math.max(0, trace.nearest.dist - CANONICAL.eigenToleranceM) / 120);
-      return {
-        canonical: isCanonicalControls(),
-        reached,
-        nearestMissM: trace.nearest.dist,
-        tlRDb: tlR,
-        tlAtGridRDb: tlAtR,
-        coverageFraction: trace.coverage.reachedFraction,
-        shadowFraction: trace.coverage.shadowFraction,
-        maxOutOfPlaneM: trace.maxOutOfPlaneM,
-        maxSnellDrift: trace.maxSnellDrift,
-        rayCount: trace.rayCount,
-        elevBeams: trace.elevBeams,
-        azBeams: trace.azBeams,
-        eigenrayCount: trace.rawEigenrayCount,
-        eigenrays: trace.eigenrays,
-        traceMs: trace.elapsedMs,
-        reciprocityErrorDb: null,
-        reciprocalTlDb: null,
-        convergenceCoverageDeltaPct: null,
-        convergenceTlDeltaDb: null,
-        fileSizeKb: estimateFileSizeKb()
-      };
-    }
-
-    function estimateFileSizeKb() {
-      const htmlText = document.documentElement.outerHTML || "";
-      return htmlText.length / 1024;
-    }
-
-    function isCanonicalControls() {
-      return Number(elevSlider.value) === CANONICAL.elevBeams &&
-        Number(azSlider.value) === CANONICAL.azBeams;
-    }
-
-    function formatDb(value) {
-      if (!Number.isFinite(value) || value >= 998) return ">112";
-      return value.toFixed(1);
-    }
-
-    function formatMeters(value) {
-      if (!Number.isFinite(value)) return "n/a";
-      if (value >= 1000) return `${(value / 1000).toFixed(2)} km`;
-      return `${value.toFixed(0)} m`;
-    }
-
-    function formatPct(value) {
-      if (!Number.isFinite(value)) return "n/a";
-      return `${(100 * value).toFixed(1)}%`;
-    }
-
-    function formatCompactTokens(value) {
-      if (!Number.isFinite(value)) return "n/a";
-      if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
-      if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
-      return String(Math.round(value));
-    }
-
-    function updateMetricsPanel() {
-      const m = state.metrics;
-      if (!m) {
-        metricsBodyEl.innerHTML = `
-          <div class="metric-head">
-            <h2 class="metric-title">Ray metrics</h2>
-            <span class="badge">Tracing</span>
-          </div>
-          <div class="metric-grid">
-            <div class="metric wide"><span>Status</span><strong>Computing canonical fan and TL grid...</strong></div>
-          </div>`;
-        return;
-      }
-      const canonicalClass = m.canonical ? "" : " off";
-      const canonicalText = m.canonical ? "canonical" : "off-canonical";
-      const eigenSummary = m.eigenrays.length
-        ? m.eigenrays.slice(0, 4).map(e => `${e.time.toFixed(2)}s/${formatDb(e.tl)}dB`).join(", ")
-        : "none within 250 m";
-      const reciprocity = m.reciprocityErrorDb === null ? "running" :
-        `${m.reciprocityErrorDb.toFixed(2)} dB`;
-      const convergence = m.convergenceCoverageDeltaPct === null ? "running" :
-        `${m.convergenceCoverageDeltaPct >= 0 ? "+" : ""}${m.convergenceCoverageDeltaPct.toFixed(2)} pct, ${m.convergenceTlDeltaDb >= 0 ? "+" : ""}${m.convergenceTlDeltaDb.toFixed(2)} dB`;
-      const tokenKpi = `${formatCompactTokens(SESSION_TOKENS_TOTAL)} tok · $${SESSION_TOKEN_COST_USD.toFixed(2)}`;
-
-      metricsBodyEl.innerHTML = `
-        <div class="metric-head">
-          <h2 class="metric-title">Ray metrics</h2>
-          <span class="badge${canonicalClass}">${canonicalText}</span>
-        </div>
-        <div class="metric-grid">
-          <div class="metric"><span>Reachability</span><strong>${m.reached ? "R reached" : "R shadowed"} / miss ${formatMeters(m.nearestMissM)}</strong></div>
-          <div class="metric"><span>TL(R)</span><strong>${formatDb(m.tlRDb)} dB</strong></div>
-          <div class="metric"><span>Coverage</span><strong>${formatPct(m.coverageFraction)} insonified</strong></div>
-          <div class="metric"><span>Shadow</span><strong>${formatPct(m.shadowFraction)} shadow</strong></div>
-          <div class="metric"><span>3D fidelity</span><strong>${formatMeters(m.maxOutOfPlaneM)} out-of-plane</strong></div>
-          <div class="metric"><span>Snell drift</span><strong>${m.maxSnellDrift.toExponential(2)}</strong></div>
-          <div class="metric"><span>Performance</span><strong>${state.fps.toFixed(0)} FPS / ${m.fileSizeKb.toFixed(0)} KB</strong></div>
-          <div class="metric"><span>Ray count</span><strong>${m.elevBeams} x ${m.azBeams} = ${m.rayCount}</strong></div>
-          <div class="metric wide"><span>Eigenrays</span><strong>${m.eigenrayCount} found: ${eigenSummary}</strong></div>
-          <div class="metric wide"><span>Reciprocity error</span><strong>${reciprocity}</strong></div>
-          <div class="metric wide"><span>2x convergence</span><strong>${convergence}</strong></div>
-          <div id="tokenKpi" class="metric wide token-kpi"><span>Token snapshot</span><strong>${tokenKpi}</strong><small>${SESSION_TOKEN_SOURCE}</small></div>
-        </div>`;
-    }
-
-    function postMetrics() {
-      if (!state.metrics || !state.field) return;
-      const payload = {
-        type: "ray_metrics",
-        canonical: state.metrics.canonical,
-        reached: state.metrics.reached,
-        nearestRayMissM: state.metrics.nearestMissM,
-        tlRDb: state.metrics.tlRDb,
-        coverageFraction: state.metrics.coverageFraction,
-        shadowFraction: state.metrics.shadowFraction,
-        maxOutOfPlaneDeflectionM: state.metrics.maxOutOfPlaneM,
-        maxSnellInvariantDrift: state.metrics.maxSnellDrift,
-        fps: state.fps,
-        fileSizeKb: state.metrics.fileSizeKb,
-        rayCount: state.metrics.rayCount,
-        elevBeams: state.metrics.elevBeams,
-        azBeams: state.metrics.azBeams,
-        eigenrayCount: state.metrics.eigenrayCount,
-        eigenrays: state.metrics.eigenrays,
-        reciprocityErrorDb: state.metrics.reciprocityErrorDb,
-        convergenceCoverageDeltaPct: state.metrics.convergenceCoverageDeltaPct,
-        convergenceTlDeltaDb: state.metrics.convergenceTlDeltaDb,
-        sessionTokenKpi: {
-          totalTokens: SESSION_TOKENS_TOTAL,
-          estimatedCostUsd: SESSION_TOKEN_COST_USD,
-          display: `${formatCompactTokens(SESSION_TOKENS_TOTAL)} tok · $${SESSION_TOKEN_COST_USD.toFixed(2)}`,
-          source: SESSION_TOKEN_SOURCE
-        },
-        grid: {
-          nx: GRID.nx,
-          ny: GRID.ny,
-          nz: GRID.nz,
-          xMinM: DOMAIN.xMin,
-          xMaxM: DOMAIN.xMax,
-          yMinM: DOMAIN.yMin,
-          yMaxM: DOMAIN.yMax,
-          zMinM: DOMAIN.zMin,
-          zMaxM: DOMAIN.zMax,
-          order: "row-major-x-fastest"
-        },
-        tlFieldDb: state.field,
-        tlGridDb: state.field
-      };
-      window.parent.postMessage(payload, "*");
-    }
-
-    function resetCamera() {
-      camera.yaw = CAMERA_HOME.yaw;
-      camera.pitch = CAMERA_HOME.pitch;
-      camera.zoom = CAMERA_HOME.zoom;
-    }
-
-    function resizeCanvas() {
-      const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-      const w = Math.floor(window.innerWidth * dpr);
-      const h = Math.floor(window.innerHeight * dpr);
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w;
-        canvas.height = h;
-        canvas.style.width = `${window.innerWidth}px`;
-        canvas.style.height = `${window.innerHeight}px`;
-      }
-      camera.scale = Math.min(w / 66, h / 34) * camera.zoom;
-      const bounds = sceneBoundsInCameraSpace();
-      camera.cx = w * CAMERA_FRAME.centerX - ((bounds.minX + bounds.maxX) / 2) * camera.scale;
-      camera.cy = h * CAMERA_FRAME.centerY + ((bounds.minY + bounds.maxY) / 2) * camera.scale;
-    }
-
-    function sceneBoundsInCameraSpace() {
-      const corners = [
-        { x: DOMAIN.xMin, y: DOMAIN.yMin, z: DOMAIN.zMin },
-        { x: DOMAIN.xMax, y: DOMAIN.yMin, z: DOMAIN.zMin },
-        { x: DOMAIN.xMax, y: DOMAIN.yMax, z: DOMAIN.zMin },
-        { x: DOMAIN.xMin, y: DOMAIN.yMax, z: DOMAIN.zMin },
-        { x: DOMAIN.xMin, y: DOMAIN.yMin, z: DOMAIN.zMax },
-        { x: DOMAIN.xMax, y: DOMAIN.yMin, z: DOMAIN.zMax },
-        { x: DOMAIN.xMax, y: DOMAIN.yMax, z: DOMAIN.zMax },
-        { x: DOMAIN.xMin, y: DOMAIN.yMax, z: DOMAIN.zMax }
-      ];
-      return corners.reduce((bounds, point) => {
-        const c = worldToCamera(point);
-        bounds.minX = Math.min(bounds.minX, c.x);
-        bounds.maxX = Math.max(bounds.maxX, c.x);
-        bounds.minY = Math.min(bounds.minY, c.y);
-        bounds.maxY = Math.max(bounds.maxY, c.y);
-        return bounds;
-      }, {
-        minX: Infinity,
-        maxX: -Infinity,
-        minY: Infinity,
-        maxY: -Infinity
-      });
-    }
-
-    function syncOverlaySpacing() {
-      const statusRect = elementRect("statusPanel");
-      const bottomGap = window.innerWidth <= 560 ? 8 : 12;
-      const clearance = statusRect ? statusRect.height + bottomGap + 12 : 72;
-      document.documentElement.style.setProperty("--status-clearance", `${clearance}px`);
-
-      if (window.innerWidth <= 780) {
-        const legendRect = elementRect("legend-wrap");
-        const metricsRect = elementRect("metrics");
-        if (legendRect && metricsRect) {
-          const maxHeight = Math.max(40, legendRect.top - metricsRect.top - 12);
-          document.documentElement.style.setProperty("--metrics-max-height", `${maxHeight}px`);
-          return;
-        }
-      }
-      document.documentElement.style.setProperty("--metrics-max-height", "none");
-    }
-
-    function elementRect(id) {
-      const el = document.getElementById(id);
-      if (!el) return null;
-      const rect = el.getBoundingClientRect();
-      return rect.width && rect.height ? rect : null;
-    }
-
-    function overlapsHorizontally(rect, left, right) {
-      return right > rect.left && left < rect.right;
-    }
-
-    function insetYWithoutOverlayCollision(height, left, right, dpr, preferredBottom = 54) {
-      const gap = 12;
-      const cssHeight = height / dpr;
-      const leftCss = left / dpr;
-      const rightCss = right / dpr;
-      let topLimit = gap;
-      let bottomLimit = window.innerHeight - preferredBottom;
-
-      ["controls", "metrics"].forEach(id => {
-        const rect = elementRect(id);
-        if (rect && overlapsHorizontally(rect, leftCss, rightCss)) {
-          topLimit = Math.max(topLimit, rect.bottom + gap);
-        }
-      });
-
-      ["legend-wrap", "statusPanel"].forEach(id => {
-        const rect = elementRect(id);
-        if (rect && overlapsHorizontally(rect, leftCss, rightCss)) {
-          bottomLimit = Math.min(bottomLimit, rect.top - gap);
-        }
-      });
-
-      if (bottomLimit - topLimit < cssHeight) return null;
-      return (bottomLimit - cssHeight) * dpr;
-    }
-
-    function insetYNearTopWithoutOverlayCollision(height, left, right, dpr, preferredTop = 12, preferredBottom = 54) {
-      const gap = 12;
-      const cssHeight = height / dpr;
-      const leftCss = left / dpr;
-      const rightCss = right / dpr;
-      let topLimit = preferredTop;
-      let bottomLimit = window.innerHeight - preferredBottom;
-
-      ["controls", "metrics"].forEach(id => {
-        const rect = elementRect(id);
-        if (rect && overlapsHorizontally(rect, leftCss, rightCss)) {
-          topLimit = Math.max(topLimit, rect.bottom + gap);
-        }
-      });
-
-      ["legend-wrap", "statusPanel"].forEach(id => {
-        const rect = elementRect(id);
-        if (rect && overlapsHorizontally(rect, leftCss, rightCss)) {
-          bottomLimit = Math.min(bottomLimit, rect.top - gap);
-        }
-      });
-
-      if (bottomLimit - topLimit < cssHeight) {
-        return insetYWithoutOverlayCollision(height, left, right, dpr, preferredBottom);
-      }
-      return topLimit * dpr;
-    }
-
-    function worldToCamera(p) {
-      const x = p.x / 1000 - 25;
-      const y = p.y / 1000 - 12;
-      const z = p.z / 1000 * VERTICAL_EXAGGERATION;
-      const cy = Math.cos(camera.yaw);
-      const sy = Math.sin(camera.yaw);
-      const cp = Math.cos(camera.pitch);
-      const sp = Math.sin(camera.pitch);
-      const x1 = x * cy - y * sy;
-      const y1 = x * sy + y * cy;
-      const z1 = z;
-      const y2 = y1 * cp - z1 * sp;
-      const z2 = y1 * sp + z1 * cp;
-      return { x: x1, y: y2, depth: z2 };
-    }
-
     function project(p) {
-      const c = worldToCamera(p);
-      return {
-        x: camera.cx + c.x * camera.scale,
-        y: camera.cy - c.y * camera.scale,
-        depth: c.depth,
-        scale: ORTHOGRAPHIC_PROJECTION_SCALE
-      };
+      if(!projectionFrame)prepareProjection();
+      const q=rotateWorld(world(p)),f=projectionFrame;
+      return {x:f.centreX+(q.x-f.midX)*f.scale,y:f.centreY-(q.y-f.midY)*f.scale,depth:q.depth,scale:1};
+    }
+    function poly(points,fill,stroke='transparent',width=1) {
+      ctx.beginPath();points.forEach((p,i)=>{const s=project(p);i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);});ctx.closePath();ctx.fillStyle=fill;ctx.fill();if(stroke!=='transparent'){ctx.strokeStyle=stroke;ctx.lineWidth=width;ctx.stroke();}
+    }
+    function tlColour(t,alpha=1) {
+      const u=clamp((t-55)/(C.TL_CUT-55),0,1);
+      const stops=[[233,205,124],[111,190,161],[58,132,158],[28,68,101],[8,21,37]];
+      const x=u*(stops.length-1),i=Math.min(stops.length-2,Math.floor(x)),f=x-i,a=stops[i],b=stops[i+1];
+      return `rgba(${Math.round(lerp(a[0],b[0],f))},${Math.round(lerp(a[1],b[1],f))},${Math.round(lerp(a[2],b[2],f))},${alpha})`;
+    }
+    function rayColour(ray,alpha=1) {
+      const u=(ray.elev-C.EMIN)/(C.EMAX-C.EMIN),h=lerp(8,215,u),light=66+4*Math.cos(ray.az*DEG*5);
+      return `hsla(${h},72%,${light}%,${alpha})`;
     }
 
-    function drawBackground() {
-      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      grad.addColorStop(0, "#0b5f83");
-      grad.addColorStop(0.34, "#07213b");
-      grad.addColorStop(1, "#020614");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      const radial = ctx.createRadialGradient(canvas.width * 0.45, canvas.height * 0.1, 40, canvas.width * 0.45, canvas.height * 0.18, canvas.width * 0.86);
-      radial.addColorStop(0, "rgba(100,232,255,0.18)");
-      radial.addColorStop(1, "rgba(2,6,20,0)");
-      ctx.fillStyle = radial;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    function drawOcean() {
+      const {w,h}=state.canvas;
+      const g=ctx.createLinearGradient(0,0,0,h);g.addColorStop(0,'#15556a');g.addColorStop(.35,'#0a3148');g.addColorStop(1,'#030b16');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+      const rg=ctx.createRadialGradient(w*.45,h*.06,0,w*.45,h*.06,Math.max(w,h)*.78);rg.addColorStop(0,'rgba(81,174,183,.17)');rg.addColorStop(.5,'rgba(3,20,35,.02)');rg.addColorStop(1,'rgba(1,6,13,.48)');ctx.fillStyle=rg;ctx.fillRect(0,0,w,h);
+      ctx.strokeStyle='rgba(113,181,190,.055)';ctx.lineWidth=1;for(let i=1;i<8;i++){ctx.beginPath();ctx.moveTo(0,h*i/8);ctx.lineTo(w,h*i/8);ctx.stroke();}
     }
-
-    function drawLine3(a, b, style, width = 1, alpha = 1) {
-      const pa = project(a);
-      const pb = project(b);
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = style;
-      ctx.lineWidth = width;
-      ctx.beginPath();
-      ctx.moveTo(pa.x, pa.y);
-      ctx.lineTo(pb.x, pb.y);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+    function drawSurface() {
+      poly([{x:0,y:0,z:0},{x:C.X,y:0,z:0},{x:C.X,y:C.Y,z:0},{x:0,y:C.Y,z:0}],'rgba(90,181,187,.075)','rgba(150,218,212,.22)',.8);
+      ctx.strokeStyle='rgba(140,208,207,.09)';ctx.lineWidth=.7;
+      for(let x=10000;x<C.X;x+=10000){const a=project({x,y:0,z:0}),b=project({x,y:C.Y,z:0});ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();}
+      for(let y=6000;y<C.Y;y+=6000){const a=project({x:0,y,z:0}),b=project({x:C.X,y,z:0});ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();}
     }
-
-    function rectsOverlap(a, b, gap = 0) {
-      return a.x < b.x + b.w + gap
-        && a.x + a.w + gap > b.x
-        && a.y < b.y + b.h + gap
-        && a.y + a.h + gap > b.y;
-    }
-
-    function labelRectFor(text, x, y, fontPx, dpr) {
-      const metrics = ctx.measureText(text);
-      const ascent = metrics.actualBoundingBoxAscent || fontPx * dpr * 0.78;
-      const descent = metrics.actualBoundingBoxDescent || fontPx * dpr * 0.24;
-      const paddingX = 4 * dpr;
-      const paddingY = 2.5 * dpr;
-      return {
-        x: x - paddingX,
-        y: y - ascent - paddingY,
-        w: metrics.width + paddingX * 2,
-        h: ascent + descent + paddingY * 2,
-        textX: x,
-        textY: y,
-        paddingX,
-        paddingY
-      };
-    }
-
-    function clampLabelRect(rect, dpr) {
-      const margin = 8 * dpr;
-      const shiftX = clamp(rect.x, margin, Math.max(margin, canvas.width - rect.w - margin)) - rect.x;
-      const shiftY = clamp(rect.y, margin, Math.max(margin, canvas.height - rect.h - margin)) - rect.y;
-      return {
-        ...rect,
-        x: rect.x + shiftX,
-        y: rect.y + shiftY,
-        textX: rect.textX + shiftX,
-        textY: rect.textY + shiftY
-      };
-    }
-
-    function syncSceneLabelBlockRects() {
-      const dpr = window.devicePixelRatio || 1;
-      sceneLabelBlockRects.length = 0;
-      ["controls", "metrics", "legend-wrap", "statusPanel"].forEach(id => {
-        const rect = elementRect(id);
-        if (!rect) return;
-        sceneLabelBlockRects.push({
-          x: rect.left * dpr,
-          y: rect.top * dpr,
-          w: rect.width * dpr,
-          h: rect.height * dpr
-        });
-      });
-    }
-
-    function drawScreenLabel(text, x, y, color, options = {}) {
-      const dpr = window.devicePixelRatio || 1;
-      const fontPx = options.fontPx || 12;
-      const weight = options.weight || 800;
-      const reserve = options.reserve !== false;
-      const gap = (options.gapPx || 4) * dpr;
-      const line = fontPx * 1.35 * dpr;
-      const shifts = options.shifts || [
-        [0, 0],
-        [0, -line],
-        [0, line],
-        [14 * dpr, -line],
-        [-14 * dpr, -line],
-        [14 * dpr, line],
-        [-14 * dpr, line],
-        [0, -line * 2],
-        [0, line * 2],
-        [0, -line * 3],
-        [0, -line * 4],
-        [36 * dpr, -line * 3],
-        [-36 * dpr, -line * 3],
-        [28 * dpr, 0],
-        [-28 * dpr, 0]
-      ];
-
-      ctx.save();
-      ctx.font = `${weight} ${fontPx * dpr}px ui-sans-serif, system-ui, sans-serif`;
-      ctx.textBaseline = "alphabetic";
-
-      let chosen = null;
-      for (const [sx, sy] of shifts) {
-        const candidate = clampLabelRect(labelRectFor(text, x + sx, y + sy, fontPx, dpr), dpr);
-        const occupied = sceneLabelRects.concat(sceneLabelBlockRects);
-        if (!reserve || !occupied.some(rect => rectsOverlap(candidate, rect, gap))) {
-          chosen = candidate;
-          break;
-        }
-        if (!chosen) chosen = candidate;
+    function drawBathymetry() {
+      const cells=[];const nx=40,ny=24;
+      for(let ix=0;ix<nx;ix++) for(let iy=0;iy<ny;iy++) {
+        const x0=C.X*ix/nx,x1=C.X*(ix+1)/nx,y0=C.Y*iy/ny,y1=C.Y*(iy+1)/ny;
+        const pts=[{x:x0,y:y0,z:bathy(x0,y0)},{x:x1,y:y0,z:bathy(x1,y0)},{x:x1,y:y1,z:bathy(x1,y1)},{x:x0,y:y1,z:bathy(x0,y1)}];
+        const d=pts.reduce((s,p)=>s+project(p).depth,0)/4;cells.push({pts,d,x:(x0+x1)/2,y:(y0+y1)/2,z:bathy((x0+x1)/2,(y0+y1)/2)});
       }
+      cells.sort((a,b)=>b.d-a.d);
+      for(const c of cells){const n=bathyNormal(c.x,c.y),light=clamp(.42+.38*Math.max(0,-.35*n.x-.28*n.y+.9*n.z),.32,.9),rim=.13*(1-Math.abs(n.z));const L=Math.round(lerp(34,66,light+rim));poly(c.pts,`hsl(44,31%,${L}%)`,'rgba(218,187,119,.12)',.45);}
+      labelPoint({x:18000,y:12000,z:bathy(18000,12000)},'SEAMOUNT A · centreline',-18,-26,'#d6b97a');
+      labelPoint({x:34000,y:9000,z:bathy(34000,9000)},'SEAMOUNT B · y 9 km',18,-30,'#d6b97a');
+    }
+    function labelPoint(p,text,dx,dy,color) {
+      const q=project(p);ctx.strokeStyle=color;ctx.globalAlpha=.7;ctx.beginPath();ctx.moveTo(q.x,q.y);ctx.lineTo(q.x+dx,q.y+dy);ctx.stroke();ctx.globalAlpha=1;ctx.fillStyle=color;ctx.font='9px system-ui, sans-serif';ctx.textAlign=dx<0?'right':'left';ctx.fillText(text,q.x+dx+(dx<0?-3:3),q.y+dy-2);
+    }
 
-      if (options.background) {
-        ctx.fillStyle = options.backgroundColor || "rgba(2, 10, 20, 0.48)";
-        ctx.strokeStyle = options.borderColor || "rgba(190, 242, 255, 0.16)";
-        ctx.lineWidth = 1 * dpr;
-        roundRect(ctx, chosen.x, chosen.y, chosen.w, chosen.h, 5 * dpr);
-        ctx.fill();
-        ctx.stroke();
+    function drawCoverage(fan) {
+      if(!fan||!fan.cloud||state.opacity<=0)return;
+      const pts=fan.cloud.map(p=>({p,q:project(p)})).sort((a,b)=>b.q.depth-a.q.depth);
+      ctx.globalCompositeOperation='lighter';
+      for(const o of pts){const a=state.opacity*(.20+.34*o.q.scale),r=clamp(1.1*o.q.scale,0.65,2.2);ctx.fillStyle=state.tlColour?tlColour(o.p.tl,a):`rgba(79,177,164,${a})`;ctx.fillRect(o.q.x-r,o.q.y-r,r*2,r*2);}
+      ctx.globalCompositeOperation='source-over';
+    }
+
+    function eventInInterval(ray,t0,t1) {
+      const e=ray.events;for(let i=0;i<e.length;i+=5) if(e[i]>=t0-1e-6&&e[i]<=t1+1e-6)return {t:e[i],x:e[i+1],y:e[i+2],z:e[i+3],topology:e[i+4]};return null;
+    }
+    function pointAtTime(ray,t) {
+      const n=sampleCount(ray);if(t<0||n===0)return null;
+      if(t>=ray.samples[(n-1)*C.STRIDE+3])return t<=ray.endTime+.15?sampleXYZ(ray,n-1):null;
+      const k=clamp(Math.floor(t/C.SAMPLE_DT),0,n-2),o=k*C.STRIDE,o2=(k+1)*C.STRIDE,t0=ray.samples[o+3],t1=ray.samples[o2+3];
+      const a={x:ray.samples[o],y:ray.samples[o+1],z:ray.samples[o+2]},b={x:ray.samples[o2],y:ray.samples[o2+1],z:ray.samples[o2+2]};
+      const ev=eventInInterval(ray,t0,t1);
+      if(ev){if(t<=ev.t){const q=(t-t0)/Math.max(1e-6,ev.t-t0);return {x:lerp(a.x,ev.x,q),y:lerp(a.y,ev.y,q),z:lerp(a.z,ev.z,q),topology:ev.topology};}const q=(t-ev.t)/Math.max(1e-6,t1-ev.t);return {x:lerp(ev.x,b.x,q),y:lerp(ev.y,b.y,q),z:lerp(ev.z,b.z,q),topology:ray.samples[o2+5]};}
+      const q=(t-t0)/Math.max(1e-6,t1-t0);return {x:lerp(a.x,b.x,q),y:lerp(a.y,b.y,q),z:lerp(a.z,b.z,q),topology:ray.samples[o+5]};
+    }
+
+    function tracePath2D(ray,t,context=ctx,projector=project,begin=true) {
+      const n=sampleCount(ray),limit=Math.min(t,ray.endTime);if(limit<=0)return;
+      let epos=0,started=false;
+      if(begin) context.beginPath();
+      for(let k=0;k<n;k++) {
+        const o=k*C.STRIDE,kt=ray.samples[o+3];
+        while(epos<ray.events.length&&ray.events[epos]<=Math.min(kt,limit)) {const q=projector({x:ray.events[epos+1],y:ray.events[epos+2],z:ray.events[epos+3]});started?context.lineTo(q.x,q.y):context.moveTo(q.x,q.y);started=true;epos+=5;}
+        if(kt>limit)break;
+        const q=projector({x:ray.samples[o],y:ray.samples[o+1],z:ray.samples[o+2]});started?context.lineTo(q.x,q.y):context.moveTo(q.x,q.y);started=true;
       }
-
-      ctx.fillStyle = color;
-      ctx.shadowColor = "rgba(0,0,0,0.86)";
-      ctx.shadowBlur = 8 * dpr;
-      ctx.fillText(text, chosen.textX, chosen.textY);
-      ctx.restore();
-
-      if (reserve) sceneLabelRects.push(chosen);
+      const head=pointAtTime(ray,limit);if(head){const q=projector(head);started?context.lineTo(q.x,q.y):context.moveTo(q.x,q.y);}
     }
 
-    function drawLabel3(p, text, color, dx = 0, dy = 0, options = {}) {
-      const pp = project(p);
-      const dpr = window.devicePixelRatio || 1;
-      drawScreenLabel(text, pp.x + dx * dpr, pp.y + dy * dpr, color, options);
-    }
-
-    function drawCameraReadout() {
-      const dpr = window.devicePixelRatio || 1;
-      const text = `cam yaw ${camera.yaw.toFixed(2)}  pitch ${camera.pitch.toFixed(2)}  zoom ${camera.zoom.toFixed(2)}x`;
-      const controlsRect = elementRect("controls");
-      const metricsRect = elementRect("metrics");
-
-      ctx.save();
-      ctx.font = `${10 * dpr}px ui-sans-serif, system-ui, sans-serif`;
-      const paddingX = 7 * dpr;
-      const paddingY = 4 * dpr;
-      const w = ctx.measureText(text).width + paddingX * 2;
-      const h = 18 * dpr;
-      const maxX = canvas.width - w - 12 * dpr;
-      const preferredX = Math.max(12, (controlsRect ? controlsRect.right + 12 : 12)) * dpr;
-      const boxX = clamp(preferredX, 12 * dpr, Math.max(12 * dpr, maxX));
-      const leftCss = boxX / dpr;
-      const rightCss = (boxX + w) / dpr;
-      let topClearance = controlsRect ? controlsRect.bottom + 10 : 12;
-      if (metricsRect && overlapsHorizontally(metricsRect, leftCss, rightCss)) {
-        topClearance = Math.max(topClearance, metricsRect.bottom + 10);
-      }
-      const boxY = Math.min(window.innerHeight - 76, topClearance) * dpr;
-      ctx.fillStyle = "rgba(2, 10, 20, 0.46)";
-      ctx.strokeStyle = "rgba(143,211,232,0.20)";
-      ctx.lineWidth = 1 * dpr;
-      roundRect(ctx, boxX, boxY, w, h, 6 * dpr);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = "rgba(206, 240, 248, 0.88)";
-      ctx.fillText(text, boxX + paddingX, boxY + h - paddingY - 1 * dpr);
-      ctx.restore();
-    }
-
-    function drawBoundingBox() {
-      const x0 = DOMAIN.xMin;
-      const x1 = DOMAIN.xMax;
-      const y0 = DOMAIN.yMin;
-      const y1 = DOMAIN.yMax;
-      const z0 = DOMAIN.zMin;
-      const z1 = DOMAIN.zMax;
-      const corners = [
-        { x: x0, y: y0, z: z0 }, { x: x1, y: y0, z: z0 },
-        { x: x1, y: y1, z: z0 }, { x: x0, y: y1, z: z0 },
-        { x: x0, y: y0, z: z1 }, { x: x1, y: y0, z: z1 },
-        { x: x1, y: y1, z: z1 }, { x: x0, y: y1, z: z1 }
-      ];
-      const edges = [
-        [0, 1], [1, 2], [2, 3], [3, 0],
-        [4, 5], [5, 6], [6, 7], [7, 4],
-        [0, 4], [1, 5], [2, 6], [3, 7]
-      ];
-      for (const [a, b] of edges) {
-        drawLine3(corners[a], corners[b], "rgba(177,239,255,0.32)", 1, 1);
-      }
-
-      for (let xKm = 0; xKm <= 50; xKm += 10) {
-        const x = xKm * 1000;
-        drawLine3({ x, y: y0, z: z0 }, { x, y: y0, z: z0 + 110 }, "rgba(177,239,255,0.34)", 1, 1);
-        drawLabel3({ x, y: y0, z: z0 + 200 }, `${xKm}`, "#a7d9e6", -5, 16);
-      }
-      for (let yKm = 0; yKm <= 24; yKm += 6) {
-        const y = yKm * 1000;
-        drawLine3({ x: x0, y, z: z0 }, { x: x0, y, z: z0 + 110 }, "rgba(177,239,255,0.34)", 1, 1);
-        drawLabel3({ x: x0, y, z: z0 + 260 }, `${yKm}`, "#a7d9e6", 4, 14);
-      }
-      for (let z = 0; z <= 3000; z += 1000) {
-        drawLine3({ x: x0, y: y0, z }, { x: x0 + 800, y: y0, z }, "rgba(177,239,255,0.34)", 1, 1);
-        drawLabel3({ x: x0 + 1200, y: y0, z }, `${z} m`, "#a7d9e6", 2, 3);
-      }
-      const axisLabelOptions = { background: true, fontPx: 12, gapPx: 7 };
-      drawLabel3({ x: 25000, y: -900, z: 0 }, "range x (km)", "#dff8ff", -40, -6, axisLabelOptions);
-      drawLabel3({ x: -1200, y: 12000, z: 0 }, "cross-range y (km)", "#dff8ff", -32, -6, axisLabelOptions);
-      drawLabel3({ x: 0, y: 0, z: 3150 }, "depth z (m)", "#dff8ff", 8, 0, axisLabelOptions);
-    }
-
-    function drawSurfacePlane() {
-      const pts = [
-        project({ x: DOMAIN.xMin, y: DOMAIN.yMin, z: 0 }),
-        project({ x: DOMAIN.xMax, y: DOMAIN.yMin, z: 0 }),
-        project({ x: DOMAIN.xMax, y: DOMAIN.yMax, z: 0 }),
-        project({ x: DOMAIN.xMin, y: DOMAIN.yMax, z: 0 })
-      ];
-      ctx.save();
-      ctx.fillStyle = "rgba(116, 227, 255, 0.10)";
-      ctx.strokeStyle = "rgba(157, 236, 255, 0.22)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i += 1) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-      drawLabel3({ x: 47000, y: 22000, z: 0 }, "surface z=0", "#bff5ff", -20, -8);
-    }
-
-    function drawSeabedCell(item, dpr, elevated = false) {
-      const shade = item.cell.shade;
-      const relief = item.cell.relief;
-      const slope = item.cell.slope;
-      const summit = item.cell.summit;
-      const footShadow = relief > 0.08 && relief < 0.36 ? 1 : 0;
-      const r = Math.round(98 + 49 * shade + 12 * relief + 45 * summit - 7 * footShadow);
-      const g = Math.round(88 + 37 * shade + 8 * relief + 34 * summit - 6 * footShadow);
-      const b = Math.round(45 + 18 * shade + 3 * relief + 10 * summit - 3 * footShadow);
-      const ridgeAlpha = elevated
-        ? Math.min(0.42, 0.16 + 0.18 * relief + 0.12 * summit)
-        : relief > 0.34 || slope > 0.42 || summit > 0
-          ? 0.07 + 0.08 * relief + 0.08 * summit
-          : 0.055;
-
-      ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-      ctx.strokeStyle = `rgba(239,218,128,${ridgeAlpha})`;
-      ctx.lineWidth = (summit > 0.2 ? 0.82 : relief > 0.54 ? 0.62 : 0.5) * dpr;
-      ctx.beginPath();
-      ctx.moveTo(item.projected[0].x, item.projected[0].y);
-      for (let i = 1; i < item.projected.length; i += 1) ctx.lineTo(item.projected[i].x, item.projected[i].y);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    }
-
-    function drawSeabed() {
-      const cells = state.seabedMesh.map(cell => {
-        const projected = cell.points.map(project);
-        const avgDepth = projected.reduce((sum, p) => sum + p.depth, 0) / projected.length;
-        return { cell, projected, avgDepth };
-      }).sort((a, b) => a.avgDepth - b.avgDepth);
-      const dpr = window.devicePixelRatio || 1;
-      const baseCells = cells.filter(item => item.cell.relief < 0.12);
-      const elevatedCells = cells.filter(item => item.cell.relief >= 0.12);
-
-      ctx.save();
-      for (const item of baseCells) drawSeabedCell(item, dpr, false);
-      for (const item of elevatedCells) drawSeabedCell(item, dpr, true);
-      ctx.restore();
-      drawSeamountSummitCaps(cells);
-      drawLabel3({ x: 18300, y: 12200, z: bathymetry(18300, 12200) - 120 }, "seamount", "#fff0a7", -24, -8);
-      drawLabel3({ x: 34200, y: 9000, z: bathymetry(34200, 9000) - 140 }, "offset seabed peak", "#fff0a7", -38, -10);
-      drawLabel3({ x: 42000, y: 21000, z: bathymetry(42000, 21000) }, "seabed D(x,y)", "#e9dfa0", -36, 12);
-    }
-
-    function drawSeamountSummitCaps(cells) {
-      ctx.save();
-      for (const item of cells) {
-        const { relief, shade, summit } = item.cell;
-        if (summit < 0.16) continue;
-        const r = Math.round(108 + 45 * shade + 10 * relief + 38 * summit);
-        const g = Math.round(96 + 34 * shade + 7 * relief + 28 * summit);
-        const b = Math.round(48 + 16 * shade + 3 * relief + 8 * summit);
-        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-        ctx.strokeStyle = `rgba(245,225,139,${0.12 + 0.08 * summit})`;
-        ctx.lineWidth = (0.55 + 0.18 * summit) * (window.devicePixelRatio || 1);
+    function drawRays(fan) {
+      if(!fan||state.time<=0)return;
+      ctx.lineCap='round';ctx.lineJoin='round';
+      for(let i=0;i<fan.ne;i++) {
         ctx.beginPath();
-        ctx.moveTo(item.projected[0].x, item.projected[0].y);
-        for (let i = 1; i < item.projected.length; i += 1) ctx.lineTo(item.projected[i].x, item.projected[i].y);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
+        for(let j=0;j<fan.na;j++){const ray=fan.rays[i*fan.na+j];tracePath2D(ray,state.time,ctx,project,false);}
+        ctx.strokeStyle=rayColour(fan.rays[i*fan.na],.17);ctx.lineWidth=.65;ctx.stroke();
       }
-      ctx.restore();
-    }
-
-    function drawVolume() {
-      if (!state.volumePoints.length) return;
-      const alpha = Number(opacitySlider.value) / 100;
-      if (alpha <= 0.01) return;
-      const useTl = tlToggle.checked;
-      colorbarEl.classList.toggle("show", useTl);
-      ctx.save();
-      ctx.shadowBlur = 0;
-      for (const p of state.volumePoints) {
-        const pr = project(p);
-        const a = alpha * (useTl ? 0.64 : 0.38);
-        ctx.fillStyle = useTl ? tlColor(p.tl, a) : `rgba(72, 223, 255, ${a})`;
-        const size = clamp(1.5 * (window.devicePixelRatio || 1) * pr.scale, 1, 2.6);
-        ctx.fillRect(pr.x - size * 0.5, pr.y - size * 0.5, size, size);
+      const heads=new Array(fan.rays.length);
+      for(let r=0;r<fan.rays.length;r++)heads[r]=pointAtTime(fan.rays[r],state.time);
+      ctx.strokeStyle='rgba(173,226,214,.11)';ctx.lineWidth=.6;ctx.beginPath();
+      for(let i=0;i<fan.ne;i++)for(let j=0;j<fan.na;j++){
+        const k=i*fan.na+j,a=heads[k];if(!a)continue;
+        for(const nk of [j+1<fan.na?k+1:-1,i+1<fan.ne?k+fan.na:-1])if(nk>=0&&heads[nk]&&heads[nk].topology===a.topology){const b=heads[nk],d=hypot3(a.x-b.x,a.y-b.y,a.z-b.z);if(d<1800){const p=project(a),q=project(b);ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);}}
+      }ctx.stroke();
+      for(let r=0;r<fan.rays.length;r++){
+        const ray=fan.rays[r],h=heads[r];if(!h)continue;const t0=Math.max(0,state.time-1.25),a=pointAtTime(ray,t0),p=project(h);
+        if(a){const q=project(a);ctx.strokeStyle=rayColour(ray,.7);ctx.lineWidth=1.25;ctx.beginPath();ctx.moveTo(q.x,q.y);ctx.lineTo(p.x,p.y);ctx.stroke();}
+        ctx.fillStyle=rayColour(ray,.78);ctx.fillRect(p.x-1,p.y-1,2,2);
       }
-      ctx.restore();
+      const eigen=fan.receiver?.arrivals||[];
+      for(const a of eigen){const ray=fan.rays[a.rayIndex];if(!ray)continue;ctx.strokeStyle='rgba(244,233,189,.86)';ctx.lineWidth=3.3;tracePath2D(ray,state.time);ctx.stroke();ctx.strokeStyle=rayColour(ray,1);ctx.lineWidth=1.35;tracePath2D(ray,state.time);ctx.stroke();}
     }
 
-    function interpolateRayAtTime(points, time) {
-      if (!points.length || time <= points[0].t) return points[0];
-      for (let i = 1; i < points.length; i += 1) {
-        if (points[i].t >= time) {
-          const a = points[i - 1];
-          const b = points[i];
-          const u = (time - a.t) / Math.max(0.0001, b.t - a.t);
-          return {
-            x: lerp(a.x, b.x, u),
-            y: lerp(a.y, b.y, u),
-            z: lerp(a.z, b.z, u),
-            t: time,
-            tl: lerp(a.tl, b.tl, u)
-          };
-        }
-      }
-      return points[points.length - 1];
+    function drawMarker(p,label,fill,ring,status) {
+      const q=project(p),r=clamp(5.2*q.scale,3.8,8);ctx.save();ctx.shadowColor=fill;ctx.shadowBlur=14;ctx.fillStyle=fill;ctx.beginPath();ctx.arc(q.x,q.y,r,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;ctx.strokeStyle=ring;ctx.lineWidth=2.2;ctx.beginPath();ctx.arc(q.x,q.y,r+4,0,Math.PI*2);ctx.stroke();ctx.fillStyle='#eee7d7';ctx.font='700 10px system-ui, sans-serif';ctx.textAlign='left';ctx.fillText(`${label}${status?' · '+status:''}`,q.x+r+8,q.y-5);ctx.restore();
     }
 
-    function indexAtTime(points, time) {
-      let lo = 0;
-      let hi = points.length - 1;
-      if (time <= points[0].t) return 0;
-      if (time >= points[hi].t) return hi;
-      while (lo < hi) {
-        const mid = (lo + hi + 1) >> 1;
-        if (points[mid].t <= time) lo = mid;
-        else hi = mid - 1;
-      }
-      return lo;
+    function drawBox() {
+      const corners=[];for(const x of [0,C.X])for(const y of [0,C.Y])for(const z of [0,C.Z])corners.push({x,y,z});
+      const edges=[];for(let i=0;i<corners.length;i++)for(let j=i+1;j<corners.length;j++){const a=corners[i],b=corners[j],diff=(a.x!==b.x)+(a.y!==b.y)+(a.z!==b.z);if(diff===1)edges.push([a,b]);}
+      ctx.strokeStyle='rgba(159,209,205,.34)';ctx.lineWidth=.8;for(const [a,b]of edges){const p=project(a),q=project(b);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.stroke();}
+      ctx.fillStyle='rgba(202,226,218,.72)';ctx.font='9px system-ui, sans-serif';ctx.textAlign='center';
+      for(let x=0;x<=C.X;x+=10000){const p=project({x,y:0,z:C.Z});ctx.fillText(`${x/1000}`,p.x,p.y+13);}let p=project({x:C.X/2,y:0,z:C.Z});ctx.fillText('RANGE x (km)',p.x,p.y+27);
+      ctx.textAlign='right';for(let y=0;y<=C.Y;y+=6000){const q=project({x:0,y,z:C.Z});ctx.fillText(`${y/1000}`,q.x-7,q.y+3);}p=project({x:0,y:C.Y/2,z:C.Z});ctx.save();ctx.translate(p.x-24,p.y);ctx.rotate(-Math.PI/2);ctx.textAlign='center';ctx.fillText('CROSS-RANGE y (km)',0,0);ctx.restore();
+      ctx.textAlign='left';for(let z=0;z<=C.Z;z+=1000){const q=project({x:0,y:C.Y,z});ctx.fillText(`${z}`,q.x+7,q.y+3);}p=project({x:0,y:C.Y,z:C.Z/2});ctx.save();ctx.translate(p.x+31,p.y);ctx.rotate(Math.PI/2);ctx.textAlign='center';ctx.fillText('DEPTH z (m)',0,0);ctx.restore();
+      labelPoint({x:C.X*.72,y:C.Y,z:0},'SURFACE z = 0',10,-6,'#9bc9c8');labelPoint({x:C.X*.78,y:C.Y,z:bathy(C.X*.78,C.Y)},'SEABED D(x,y)',10,10,'#d6b97a');
     }
 
-    function drawRays() {
-      if (!state.rays.length || state.currentTime <= 0.02) return;
-      const dpr = window.devicePixelRatio || 1;
-      const rayDisplayStride = state.rays.length > 1600 ? 2 : 1;
-      ctx.save();
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      for (const ray of state.rays) {
-        if (!ray.eigen && ray.id % rayDisplayStride !== 0) continue;
-        const points = ray.points;
-        if (!points || points.length < 2) continue;
-        const endIndex = indexAtTime(points, state.currentTime);
-        let hasStarted = false;
-        ctx.beginPath();
-        const stride = ray.eigen ? 1 : 5;
-        for (let i = 0; i <= endIndex; i += stride) {
-          const p = points[i];
-          const pp = project(p);
-          if (!hasStarted) {
-            ctx.moveTo(pp.x, pp.y);
-            hasStarted = true;
-          } else {
-            ctx.lineTo(pp.x, pp.y);
-          }
-        }
-        if (endIndex > 0 && endIndex % stride !== 0) {
-          const pp = project(points[endIndex]);
-          if (!hasStarted) {
-            ctx.moveTo(pp.x, pp.y);
-            hasStarted = true;
-          } else {
-            ctx.lineTo(pp.x, pp.y);
-          }
-        }
-        if (hasStarted) {
-          ctx.globalAlpha = ray.eigen ? 0.96 : RAY_ALPHA;
-          ctx.strokeStyle = ray.eigen ? "#ffffff" : ray.color;
-          ctx.lineWidth = (ray.eigen ? 2.4 : 1.02) * dpr;
-          ctx.shadowColor = ray.eigen ? "rgba(255,255,255,0.65)" : "transparent";
-          ctx.shadowBlur = ray.eigen ? 9 : 0;
-          ctx.stroke();
-        }
-
-        const head = interpolateRayAtTime(points, state.currentTime);
-        if (head && head.t <= points[points.length - 1].t) {
-          const hp = project(head);
-          ctx.globalAlpha = ray.eigen ? 1 : 0.74;
-          ctx.fillStyle = ray.eigen ? "#ffffff" : ray.color;
-          ctx.shadowColor = ctx.fillStyle;
-          ctx.shadowBlur = ray.eigen ? 12 : 0;
-          ctx.beginPath();
-          ctx.arc(hp.x, hp.y, (ray.eigen ? 3.4 : 2.3) * dpr * hp.scale, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-      ctx.restore();
-      ctx.globalAlpha = 1;
+    function drawColourbar() {
+      if(!state.tlColour)return;const {w,h}=state.canvas,x=w-42,y=h*.34,bh=Math.min(160,h*.34),bw=8;for(let i=0;i<bh;i++){ctx.fillStyle=tlColour(55+(C.TL_CUT-55)*i/bh,1);ctx.fillRect(x,y+i,bw,1);}ctx.fillStyle='#dbe4dc';ctx.font='9px system-ui,sans-serif';ctx.textAlign='right';ctx.fillText('55 dB',x-4,y+4);ctx.fillText('110',x-4,y+bh);ctx.save();ctx.translate(x+25,y+bh/2);ctx.rotate(Math.PI/2);ctx.textAlign='center';ctx.fillText('RAY-TUBE TL',0,0);ctx.restore();
     }
 
-    function drawSphere(p, radiusPx, fill, glow, label, labelColor, ring) {
-      const pp = project(p);
-      const dpr = window.devicePixelRatio || 1;
-      const r = radiusPx * dpr * pp.scale;
-      ctx.save();
-      ctx.shadowColor = glow;
-      ctx.shadowBlur = 18 * dpr;
-      ctx.fillStyle = fill;
-      ctx.beginPath();
-      ctx.arc(pp.x, pp.y, r, 0, Math.PI * 2);
-      ctx.fill();
-      if (ring) {
-        ctx.shadowBlur = 8 * dpr;
-        ctx.strokeStyle = ring;
-        ctx.lineWidth = 2.2 * dpr;
-        ctx.beginPath();
-        ctx.arc(pp.x, pp.y, r + 6 * dpr, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.restore();
-      drawScreenLabel(label, pp.x + 9 * dpr, pp.y - 9 * dpr, labelColor, {
-        background: true,
-        fontPx: 13,
-        gapPx: 7
-      });
+    function drawScene() {
+      resizeCanvas(scene,'canvas');const {dpr}=state.canvas;ctx.setTransform(dpr,0,0,dpr,0,0);projectionFrame=null;prepareProjection();drawOcean();drawSurface();drawBathymetry();drawCoverage(state.display);drawRays(state.display);drawBox();
+      const reached=state.display?.receiver?.reached??state.metrics?.receiver.reached??false;drawMarker(C.S,'S','#f1d59f','#f4e8c8','SOURCE');drawMarker(C.R,'R','#78c5c3',reached?'#92bd72':'#d46c5b',state.display?.receiver?(reached?'REACHED':'UNREACHED'):'CALCULATING');drawColourbar();
+      $('sceneTime').textContent=`t = ${state.time.toFixed(2)} s`;state.dirty=false;
     }
 
-    function drawEndpoints() {
-      drawSphere(SOURCE, 5.2, "#fff8d9", "rgba(255, 231, 151, 0.85)", "S source", "#fff8d9", null);
-      const reached = state.metrics && state.metrics.reached;
-      drawSphere(RECEIVER, 5.0, "#67e8ff", "rgba(82, 228, 255, 0.82)", "R receiver", "#bff7ff", reached ? "#6dff9d" : "#ff5b6c");
+    function plotProject(x,z,w,h,m) {return {x:m.l+x/C.X*(w-m.l-m.r),y:m.t+z/C.Z*(h-m.t-m.b)};}
+    function drawSection() {
+      resizeCanvas(section,'sectionCanvas');const {w,h,dpr}=state.sectionCanvas;sctx.setTransform(dpr,0,0,dpr,0,0);sctx.fillStyle='#07131f';sctx.fillRect(0,0,w,h);const m={l:39,r:12,t:28,b:24};
+      const activeFan=state.display||state.canonical;
+      if(activeFan?.field){const field=activeFan.field,iy=24,cw=(w-m.l-m.r)/(C.NX-1),ch=(h-m.t-m.b)/(C.NZ-1);for(let iz=0;iz<C.NZ;iz++)for(let ix=0;ix<C.NX;ix++){const id=idx3(ix,iy,iz),x=m.l+ix*cw,y=m.t+iz*ch;if(!waterMask[id])sctx.fillStyle='#625a35';else sctx.fillStyle=field[id]<=C.TL_CUT?tlColour(field[id],.9):'#071521';sctx.fillRect(x-cw/2,y-ch/2,cw+1,ch+1);}}
+      sctx.strokeStyle='rgba(196,219,211,.25)';sctx.lineWidth=.7;for(let x=0;x<=C.X;x+=10000){const a=plotProject(x,0,w,h,m),b=plotProject(x,C.Z,w,h,m);sctx.beginPath();sctx.moveTo(a.x,a.y);sctx.lineTo(b.x,b.y);sctx.stroke();}for(let z=0;z<=C.Z;z+=1000){const a=plotProject(0,z,w,h,m),b=plotProject(C.X,z,w,h,m);sctx.beginPath();sctx.moveTo(a.x,a.y);sctx.lineTo(b.x,b.y);sctx.stroke();}
+      if(activeFan){const projector=p=>plotProject(p.x,p.z,w,h,m);for(let i=0;i<activeFan.ne;i++){const ray=activeFan.rays[i*activeFan.na+Math.floor(activeFan.na/2)];sctx.strokeStyle=rayColour(ray,.34);sctx.lineWidth=.55;tracePath2D(ray,state.time,sctx,projector);sctx.stroke();}}
+      sctx.strokeStyle='#d1b571';sctx.lineWidth=1.4;sctx.beginPath();for(let ix=0;ix<C.NX;ix++){const p=plotProject(ix*C.DX,bathy(ix*C.DX,12000),w,h,m);ix?sctx.lineTo(p.x,p.y):sctx.moveTo(p.x,p.y);}sctx.stroke();
+      const sp=plotProject(C.S.x,C.S.z,w,h,m),rp=plotProject(C.R.x,C.R.z,w,h,m);sctx.fillStyle='#f1d59f';sctx.beginPath();sctx.arc(sp.x,sp.y,3.3,0,Math.PI*2);sctx.fill();sctx.strokeStyle='#78c5c3';sctx.beginPath();sctx.arc(rp.x,rp.y,4,0,Math.PI*2);sctx.stroke();sctx.fillStyle='#b9ceca';sctx.font='9px system-ui,sans-serif';sctx.fillText('S',sp.x+6,sp.y-4);sctx.fillText('R projected · 3 km off slice',rp.x-116,rp.y-7);
+      sctx.fillStyle='#8baab0';sctx.textAlign='center';for(let x=0;x<=50;x+=10){const p=plotProject(x*1000,C.Z,w,h,m);sctx.fillText(String(x),p.x,h-7);}sctx.textAlign='right';for(let z=0;z<=3000;z+=1000){const p=plotProject(0,z,w,h,m);sctx.fillText(String(z),m.l-5,p.y+3);}sctx.textAlign='center';sctx.fillText('range x (km)',m.l+(w-m.l-m.r)/2,h-7);sctx.save();sctx.translate(10,m.t+(h-m.t-m.b)/2);sctx.rotate(-Math.PI/2);sctx.fillText('depth z (m)',0,0);sctx.restore();
     }
 
-    function drawArrivalsInset() {
-      if (!state.showArrivals) return;
-      const m = state.metrics;
-      if (!m) return;
-      const arrivals = m.eigenrays;
-      const dpr = window.devicePixelRatio || 1;
-      const w = 210 * dpr;
-      const h = 108 * dpr;
-      const insetMargin = 14 * dpr;
-      const insetGap = 12 * dpr;
-      const crossSectionInsetW = state.showCrossSection ? Math.min(350 * dpr, canvas.width * 0.30) : 0;
-      const preferredLeft = insetMargin + (crossSectionInsetW ? crossSectionInsetW + insetGap : 0);
-      const maxX = Math.max(12 * dpr, canvas.width - w - 18 * dpr);
-      const x0 = clamp(preferredLeft, 12 * dpr, maxX);
-      const y0 = insetYWithoutOverlayCollision(h, x0, x0 + w, dpr);
-      if (y0 === null) return;
-
-      ctx.save();
-      ctx.fillStyle = "rgba(2, 10, 20, 0.58)";
-      ctx.strokeStyle = "rgba(143,211,232,0.22)";
-      ctx.lineWidth = 1 * dpr;
-      roundRect(ctx, x0, y0, w, h, 8 * dpr);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = "#c6ecf5";
-      ctx.font = `${11 * dpr}px ui-sans-serif, system-ui, sans-serif`;
-      ctx.fillText("Arrivals at R", x0 + 10 * dpr, y0 + 18 * dpr);
-
-      const pad = 24 * dpr;
-      const plotX = x0 + pad;
-      const plotY = y0 + 30 * dpr;
-      const plotW = w - pad - 12 * dpr;
-      const plotH = h - 42 * dpr;
-      ctx.strokeStyle = "rgba(180,230,243,0.28)";
-      ctx.beginPath();
-      ctx.moveTo(plotX, plotY);
-      ctx.lineTo(plotX, plotY + plotH);
-      ctx.lineTo(plotX + plotW, plotY + plotH);
-      ctx.stroke();
-
-      if (!arrivals.length) {
-        ctx.fillStyle = "#ffb3bd";
-        ctx.font = `${10 * dpr}px ui-sans-serif, system-ui, sans-serif`;
-        ctx.fillText("No eigenrays within 250 m", plotX + 5 * dpr, plotY + 31 * dpr);
-      } else {
-        const minT = Math.min(...arrivals.map(a => a.time));
-        const maxT = Math.max(...arrivals.map(a => a.time));
-        const minTl = Math.min(...arrivals.map(a => a.tl));
-        const maxTl = Math.max(...arrivals.map(a => a.tl));
-        const shown = arrivals.slice(0, 18);
-        shown.forEach((a, index) => {
-          let xFrac = maxT === minT ? 0.5 : (a.time - minT) / (maxT - minT);
-          if (maxT - minT < 0.015 && shown.length > 1) {
-            xFrac = 0.5 + (index - (shown.length - 1) / 2) * 0.026;
-          }
-          const tx = plotX + clamp(xFrac, 0.08, 0.92) * plotW;
-          const amp = maxTl === minTl ? 0.8 : 1 - (a.tl - minTl) / (maxTl - minTl + 0.001);
-          const stemH = Math.max(8 * dpr, amp * plotH);
-          ctx.strokeStyle = index % 2 === 0 ? "#dffcff" : tlColor(a.tl, 0.96);
-          ctx.lineWidth = 2.6 * dpr;
-          ctx.beginPath();
-          ctx.moveTo(tx, plotY + plotH);
-          ctx.lineTo(tx, plotY + plotH - stemH);
-          ctx.stroke();
-        });
-      }
-      ctx.fillStyle = "#9bcdd8";
-      ctx.font = `${9 * dpr}px ui-sans-serif, system-ui, sans-serif`;
-      ctx.fillText("time", plotX + plotW - 21 * dpr, plotY + plotH + 12 * dpr);
-      ctx.fillText("amp", plotX - 21 * dpr, plotY + 6 * dpr);
-      ctx.restore();
+    function drawArrivals() {
+      resizeCanvas(arrivalsCanvas,'arrivalCanvas');const {w,h,dpr}=state.arrivalCanvas;actx.setTransform(dpr,0,0,dpr,0,0);actx.fillStyle='#081520';actx.fillRect(0,0,w,h);const activeFan=state.display||state.canonical,list=activeFan?.receiver?.arrivals||[],m={l:35,r:14,t:32,b:24};actx.strokeStyle='rgba(179,210,204,.28)';actx.beginPath();actx.moveTo(m.l,h-m.b);actx.lineTo(w-m.r,h-m.b);actx.stroke();
+      if(!activeFan?.receiver){actx.fillStyle='#8da9ad';actx.font='11px system-ui,sans-serif';actx.fillText('Computing arrivals…',m.l,h*.56);return;}
+      if(!list.length){actx.fillStyle='#a5b9b8';actx.font='11px system-ui,sans-serif';actx.fillText('No eigenrays within 350 m tolerance',m.l,h*.54);return;}
+      const t0=Math.max(0,Math.min(...list.map(a=>a.time))-.25),t1=Math.max(t0+1,Math.max(...list.map(a=>a.time))+.25),maxAmp=Math.max(...list.map(a=>10**(-a.tl/20)));
+      list.forEach((a,i)=>{const amp=10**(-a.tl/20)/maxAmp,x=m.l+(a.time-t0)/(t1-t0)*(w-m.l-m.r),y=h-m.b-amp*(h-m.t-m.b-8);actx.strokeStyle=rayColour(activeFan.rays[a.rayIndex],.9);actx.lineWidth=1.5;actx.beginPath();actx.moveTo(x,h-m.b);actx.lineTo(x,y);actx.stroke();actx.fillStyle='#e7d9ae';actx.beginPath();actx.arc(x,y,3,0,Math.PI*2);actx.fill();actx.fillStyle='#a9bfbb';actx.font='8px system-ui,sans-serif';actx.textAlign='center';if(i<6)actx.fillText(`${a.time.toFixed(2)}s`,x,y-6);});
+      actx.fillStyle='#8baab0';actx.font='9px system-ui,sans-serif';actx.textAlign='left';actx.fillText(`${t0.toFixed(1)} s`,m.l,h-7);actx.textAlign='right';actx.fillText(`${t1.toFixed(1)} s`,w-m.r,h-7);actx.save();actx.translate(10,m.t+(h-m.t-m.b)/2);actx.rotate(-Math.PI/2);actx.textAlign='center';actx.fillText('relative pressure',0,0);actx.restore();
     }
 
-    function drawXsectionPanel() {
-      if (!state.showCrossSection) return;
-      const w = xsectionCanvas.width;
-      const h = xsectionCanvas.height;
-      const PAD = { l: 34, r: 6, t: 34, b: 22 };
-      const pw = w - PAD.l - PAD.r;
-      const ph = h - PAD.t - PAD.b;
-      const cx = xm => PAD.l + xm / DOMAIN.xMax * pw;
-      const cz = zm => PAD.t + zm / DOMAIN.zMax * ph;
-
-      xctx.clearRect(0, 0, w, h);
-
-      xctx.fillStyle = "rgba(155,182,216,.75)";
-      xctx.font = "bold 8px \"IBM Plex Mono\",monospace";
-      xctx.textAlign = "left";
-      xctx.fillText("Centerline x-section (x–z)", PAD.l, 10);
-      xctx.fillStyle = "rgba(155,182,216,.55)";
-      xctx.font = "7.5px \"IBM Plex Mono\",monospace";
-      xctx.fillText("y = 12 km", PAD.l, 19);
-
-      xctx.beginPath();
-      xctx.moveTo(cx(state.crossSection[0].x), cz(state.crossSection[0].z));
-      for (let i = 1; i < state.crossSection.length; i += 1) {
-        const sample = state.crossSection[i];
-        xctx.lineTo(cx(sample.x), cz(sample.z));
-      }
-      xctx.lineTo(cx(DOMAIN.xMax), cz(DOMAIN.zMax));
-      xctx.lineTo(cx(0), cz(DOMAIN.zMax));
-      xctx.closePath();
-      xctx.fillStyle = "rgba(160,120,70,.40)";
-      xctx.fill();
-      xctx.strokeStyle = "rgba(210,170,100,.55)";
-      xctx.lineWidth = 0.8;
-      xctx.stroke();
-
-      xctx.globalAlpha = 0.68;
-      xctx.lineWidth = 0.7;
-      for (const ray of state.rays) {
-        if (Math.abs(ray.azDeg) > 0.55) continue;
-        xctx.strokeStyle = ray.color;
-        xctx.beginPath();
-        let started = false;
-        for (let i = 0; i < ray.points.length; i += 3) {
-          const p = ray.points[i];
-          if (p.t > state.currentTime) break;
-          const px = cx(p.x);
-          const py = cz(p.z);
-          if (!started) {
-            xctx.moveTo(px, py);
-            started = true;
-          } else {
-            xctx.lineTo(px, py);
-          }
-        }
-        if (started) xctx.stroke();
-      }
-      xctx.globalAlpha = 1;
-
-      xctx.strokeStyle = "rgba(155,182,216,.35)";
-      xctx.lineWidth = 0.7;
-      xctx.beginPath();
-      xctx.moveTo(PAD.l, PAD.t);
-      xctx.lineTo(PAD.l, PAD.t + ph);
-      xctx.moveTo(PAD.l, PAD.t + ph);
-      xctx.lineTo(PAD.l + pw, PAD.t + ph);
-      xctx.stroke();
-
-      xctx.fillStyle = "rgba(155,182,216,.55)";
-      xctx.font = "7.5px \"IBM Plex Mono\",monospace";
-      xctx.textAlign = "center";
-      [0, 10, 20, 30, 40, 50].forEach(xk => xctx.fillText(String(xk), cx(xk * 1000), PAD.t + ph + 10));
-      xctx.fillText("range (km)", PAD.l + pw / 2, PAD.t + ph + 20);
-      xctx.textAlign = "right";
-      [0, 1000, 2000, 3000].forEach(zm => xctx.fillText(zm ? zm / 1000 + "k" : "0", PAD.l - 3, cz(zm) + 3));
-
-      xctx.fillStyle = "#ffd36b";
-      xctx.textAlign = "center";
-      xctx.font = "bold 9px sans-serif";
-      xctx.beginPath();
-      xctx.arc(cx(SOURCE.x), cz(SOURCE.z), 2.5, 0, Math.PI * 2);
-      xctx.fill();
-      xctx.fillText("S", cx(SOURCE.x), cz(SOURCE.z) - 5);
-
-      xctx.fillStyle = "#9fe8ff";
-      xctx.beginPath();
-      xctx.arc(cx(RECEIVER.x), cz(RECEIVER.z), 2.5, 0, Math.PI * 2);
-      xctx.fill();
-      xctx.fillText("R", cx(RECEIVER.x), cz(RECEIVER.z) - 5);
-
-      xctx.textAlign = "left";
+    function renderLoop(now) {
+      state.frameCounter++;
+      if(now-state.fpsStamp>=1000){state.fps=state.frameCounter*1000/(now-state.fpsStamp);state.frameCounter=0;state.fpsStamp=now;$('fpsValue').textContent=`${state.fps.toFixed(0)} FPS`;}
+      if(state.playing&&state.display){const dt=Math.min(.08,(now-state.lastFrame)/1000);state.time+=dt*state.speed;if(state.time>=state.display.maxTime){state.time=state.display.maxTime;state.playing=false;$('playButton').textContent='Play';} $('timeSlider').value=state.time;$('timeOutput').textContent=`${state.time.toFixed(2)} s`;state.dirty=true;if(!reducedMotion||now%100<20)state.plotDirty=true;}
+      state.lastFrame=now;
+      if(state.dirty)drawScene();if(state.plotDirty){drawSection();drawArrivals();state.plotDirty=false;}
+      requestAnimationFrame(renderLoop);
     }
 
-    function tlColorRef(tl) {
-      const t = Math.max(0, Math.min(1, (tl - 45) / 70));
-      const r = Math.min(1, Math.max(0, 1.4 * t - 0.2));
-      const g = Math.sin(Math.PI * t);
-      const b = Math.min(1, Math.max(0, 1.2 - 1.6 * t));
-      return [r * 0.9 + 0.1, g * 0.85, b * 0.95];
-    }
+    function setPlaying(on){if(!state.display)return;state.playing=on;if(on&&state.time>=state.display.maxTime-.01)state.time=0;$('playButton').textContent=on?'Pause':'Play';state.lastFrame=performance.now();state.dirty=state.plotDirty=true;}
+    $('playButton').addEventListener('click',()=>setPlaying(!state.playing));
+    $('resetButton').addEventListener('click',()=>{setPlaying(false);state.time=0;$('timeSlider').value=0;$('timeOutput').textContent='0.00 s';state.dirty=state.plotDirty=true;});
+    function resetCamera(){state.camera={yaw:-.58,pitch:-.32,zoom:.98};state.dirty=true;}
+    $('cameraButton').addEventListener('click',resetCamera);
+    $('timeSlider').addEventListener('input',e=>{setPlaying(false);state.time=+e.target.value;$('timeOutput').textContent=`${state.time.toFixed(2)} s`;state.dirty=state.plotDirty=true;});
+    $('opacitySlider').addEventListener('input',e=>{state.opacity=+e.target.value/100;$('opacityOutput').textContent=`${e.target.value}%`;state.dirty=true;});
+    $('tlToggle').addEventListener('click',e=>{state.tlColour=e.currentTarget.getAttribute('aria-pressed')!=='true';e.currentTarget.setAttribute('aria-pressed',String(state.tlColour));e.currentTarget.textContent=`TL colour: ${state.tlColour?'on':'off'}`;state.dirty=true;});
+    document.querySelectorAll('[data-speed]').forEach(b=>b.addEventListener('click',()=>{state.speed=+b.dataset.speed;document.querySelectorAll('[data-speed]').forEach(x=>x.classList.toggle('active',x===b));}));
 
-    function drawTLBarCanvas() {
-      const c = document.getElementById("tlbar");
-      const tctx = c.getContext("2d");
-      const bh = c.height;
-      for (let y = 0; y < bh; y += 1) {
-        const tl = 115 - (y / bh) * 70;
-        const col = tlColorRef(tl);
-        tctx.fillStyle = `rgb(${col.map(v => v * 255 | 0).join(",")})`;
-        tctx.fillRect(0, y, c.width, 1);
-      }
-    }
+    function updateCanonicalBadge(){const ne=+$('elevSlider').value,na=+$('azSlider').value,canonical=ne===C.CE&&na===C.CA;$('elevOutput').textContent=ne;$('azOutput').textContent=na;$('canonicalBadge').textContent=canonical?'Canonical':'Off-canonical · exploratory';$('canonicalBadge').classList.toggle('off',!canonical);$('rayCountTop').textContent=`${ne} × ${na} · ${comma(ne*na)} rays${canonical?'':' · card stays canonical'}`;return canonical;}
+    let traceTimer;
+    async function retraceDisplay(){const ne=+$('elevSlider').value,na=+$('azSlider').value;if(ne===C.CE&&na===C.CA){state.displayToken++;state.display=state.canonical;state.time=0;$('timeSlider').max=state.display.maxTime;$('timeSlider').value=0;$('sceneStatus').textContent='Canonical · 1,271 rays';state.dirty=state.plotDirty=true;return;}const token=++state.displayToken;setPlaying(false);$('sceneStatus').textContent=`Tracing exploratory ${comma(ne*na)} rays`;try{const fan=await traceFan(ne,na,C.S,C.R,false,`Exploratory trace ${ne} × ${na}…`,token);await computeTubeTl(fan,'Estimating exploratory ray tubes…',token);fan.receiver=receiverAnalysis(fan);await computeField(fan,'Rasterising exploratory coverage…',token);if(token!==state.displayToken)return;state.display=fan;state.time=0;$('timeSlider').max=fan.maxTime;$('timeSlider').value=0;$('sceneStatus').textContent=`Exploratory · ${comma(ne*na)} rays`;state.dirty=state.plotDirty=true;$('liveStatus').textContent=`Off-canonical exploratory trace ready with ${comma(ne*na)} rays. Metric card remains canonical.`;}catch(err){if(err.message!=='cancelled')console.error(err);}}
+    for(const id of ['elevSlider','azSlider']){$(id).addEventListener('input',()=>{updateCanonicalBadge();clearTimeout(traceTimer);traceTimer=setTimeout(retraceDisplay,420);});}
+    $('canonicalButton').addEventListener('click',()=>{$('elevSlider').value=C.CE;$('azSlider').value=C.CA;updateCanonicalBadge();retraceDisplay();});
 
-    function roundRect(context, x, y, w, h, r) {
-      const rr = Math.min(r, w / 2, h / 2);
-      context.beginPath();
-      context.moveTo(x + rr, y);
-      context.arcTo(x + w, y, x + w, y + h, rr);
-      context.arcTo(x + w, y + h, x, y + h, rr);
-      context.arcTo(x, y + h, x, y, rr);
-      context.arcTo(x, y, x + w, y, rr);
-      context.closePath();
-    }
+    scene.addEventListener('pointerdown',e=>{scene.setPointerCapture(e.pointerId);state.pinch.set(e.pointerId,{x:e.clientX,y:e.clientY});if(state.pinch.size===1)state.drag={id:e.pointerId,x:e.clientX,y:e.clientY,yaw:state.camera.yaw,pitch:state.camera.pitch};scene.classList.add('dragging');});
+    scene.addEventListener('pointermove',e=>{if(!state.pinch.has(e.pointerId))return;const oldMap=new Map(state.pinch);state.pinch.set(e.pointerId,{x:e.clientX,y:e.clientY});if(state.pinch.size===1&&state.drag){state.camera.yaw=state.drag.yaw+(e.clientX-state.drag.x)*.006;state.camera.pitch=clamp(state.drag.pitch+(e.clientY-state.drag.y)*.005,-1.30,1.30);state.dirty=true;}else if(state.pinch.size===2){const a=[...oldMap.values()],b=[...state.pinch.values()],d0=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y),d1=Math.hypot(b[0].x-b[1].x,b[0].y-b[1].y);if(d0>2){state.camera.zoom=clamp(state.camera.zoom*d1/d0,.45,2.1);state.dirty=true;}}});
+    function pointerEnd(e){state.pinch.delete(e.pointerId);if(state.drag?.id===e.pointerId)state.drag=null;if(!state.pinch.size)scene.classList.remove('dragging');}
+    scene.addEventListener('pointerup',pointerEnd);scene.addEventListener('pointercancel',pointerEnd);
+    scene.addEventListener('wheel',e=>{e.preventDefault();state.camera.zoom=clamp(state.camera.zoom*Math.exp(-e.deltaY*.001),.45,2.1);state.dirty=true;},{passive:false});
+    scene.addEventListener('keydown',e=>{let used=true;if(e.key==='ArrowLeft')state.camera.yaw-=.08;else if(e.key==='ArrowRight')state.camera.yaw+=.08;else if(e.key==='ArrowUp')state.camera.pitch=clamp(state.camera.pitch-.06,-1.3,1.3);else if(e.key==='ArrowDown')state.camera.pitch=clamp(state.camera.pitch+.06,-1.3,1.3);else if(e.key==='+'||e.key==='=')state.camera.zoom=clamp(state.camera.zoom*1.1,.45,2.1);else if(e.key==='-')state.camera.zoom=clamp(state.camera.zoom/1.1,.45,2.1);else if(e.key==='Home')resetCamera();else used=false;if(used){e.preventDefault();state.dirty=true;}});
+    document.addEventListener('visibilitychange',()=>{if(document.hidden)setPlaying(false);});
 
-    function render(now) {
-      resizeCanvas();
-      syncOverlaySpacing();
-      const dt = Math.min(0.08, (now - state.lastFrameMs) / 1000);
-      state.lastFrameMs = now;
-      if (state.playing) {
-        const speed = Number(speedSelect.value);
-        state.currentTime = Math.min(state.maxTime, state.currentTime + dt * speed * (state.maxTime / 14));
-        if (state.currentTime >= state.maxTime) {
-          state.playing = false;
-          playBtn.textContent = "Play";
-        }
-        timeSlider.value = String(state.currentTime);
-        timeOut.textContent = `${state.currentTime.toFixed(1)} s`;
-      }
-
-      state.frameCount += 1;
-      if (now - state.fpsWindowStart > 700) {
-        state.fps = state.frameCount * 1000 / (now - state.fpsWindowStart);
-        state.frameCount = 0;
-        state.fpsWindowStart = now;
-        if (state.metrics) {
-          state.metrics.fileSizeKb = estimateFileSizeKb();
-          updateMetricsPanel();
-        }
-      }
-
-      sceneLabelRects.length = 0;
-      syncSceneLabelBlockRects();
-      drawBackground();
-      drawSurfacePlane();
-      drawVolume();
-      drawSeabed();
-      drawBoundingBox();
-      drawCameraReadout();
-      drawRays();
-      drawEndpoints();
-      drawXsectionPanel();
-      drawArrivalsInset();
-
-      requestAnimationFrame(render);
-    }
-
-    function performTrace() {
-      if (state.tracing) return;
-      state.tracing = true;
-      state.playing = false;
-      playBtn.textContent = "Play";
-      colorbarEl.classList.toggle("show", tlToggle.checked);
-      const elevBeams = Number(elevSlider.value);
-      const azBeams = Number(azSlider.value);
-      statusEl.textContent = `Tracing ${elevBeams} x ${azBeams} rays and TL grid...`;
-      updateMetricsPanel();
-
-      setTimeout(() => {
-        try {
-          const trace = traceFan(elevBeams, azBeams, {
-            origin: SOURCE,
-            target: RECEIVER,
-            forward: { x: 1, y: 0, z: 0 },
-            store: true,
-            makeField: true,
-            ds: CANONICAL.ds,
-            maxSteps: CANONICAL.maxSteps,
-            depositStride: 1
-          });
-          state.rays = trace.rays;
-          state.field = trace.field;
-          state.maxTime = Math.max(1, trace.maxTime);
-          state.currentTime = 0;
-          timeSlider.max = String(Math.ceil(state.maxTime * 10) / 10);
-          timeSlider.value = "0";
-          timeOut.textContent = "0.0 s";
-          state.volumePoints = buildVolumePoints(trace.field);
-          state.metrics = makeMetrics(trace);
-          statusEl.textContent = `Trace complete in ${(trace.elapsedMs / 1000).toFixed(2)} s. Drag to orbit, scroll to zoom.`;
-          updateMetricsPanel();
-          postMetrics();
-          runSelfChecks(trace);
-        } catch (error) {
-          console.error(error);
-          statusEl.textContent = `Trace failed: ${error.message}`;
-        } finally {
-          state.tracing = false;
-        }
-      }, 30);
-    }
-
-    function runSelfChecks(canonicalTrace) {
-      if (!state.metrics) return;
-      statusEl.textContent = "Trace complete. Running reciprocity and 2x convergence checks...";
-      setTimeout(() => {
-        const reverseForward = {
-          x: SOURCE.x - RECEIVER.x,
-          y: SOURCE.y - RECEIVER.y,
-          z: SOURCE.z - RECEIVER.z
-        };
-        const reciprocal = traceFan(CANONICAL.elevBeams, CANONICAL.azBeams, {
-          origin: RECEIVER,
-          target: SOURCE,
-          forward: reverseForward,
-          store: false,
-          makeField: false,
-          ds: CANONICAL.ds * 1.15,
-          maxSteps: CANONICAL.maxSteps
-        });
-        const reciprocalTl = reciprocal.nearest.tl;
-        state.metrics.reciprocalTlDb = reciprocalTl;
-        state.metrics.reciprocityErrorDb = Math.abs(state.metrics.tlRDb - reciprocalTl);
-        updateMetricsPanel();
-        postMetrics();
-
-        setTimeout(() => {
-          const dense = traceFan(CANONICAL.elevBeams * 2, CANONICAL.azBeams * 2, {
-            origin: SOURCE,
-            target: RECEIVER,
-            forward: { x: 1, y: 0, z: 0 },
-            store: false,
-            makeField: true,
-            ds: CANONICAL.ds * 1.35,
-            maxSteps: Math.ceil(CANONICAL.maxSteps / 1.2),
-            depositStride: 2
-          });
-          const denseTlR = computeTlAtPoint(dense.field, RECEIVER);
-          const denseTl = dense.nearest.dist <= CANONICAL.eigenToleranceM || denseTlR <= CANONICAL.shadowCutoffDb
-            ? Math.min(dense.nearest.tl, denseTlR)
-            : CANONICAL.shadowCutoffDb + Math.max(0, dense.nearest.dist - CANONICAL.eigenToleranceM) / 120;
-          state.metrics.convergenceCoverageDeltaPct =
-            (dense.coverage.reachedFraction - canonicalTrace.coverage.reachedFraction) * 100;
-          state.metrics.convergenceTlDeltaDb = denseTl - state.metrics.tlRDb;
-          statusEl.textContent = `Self-checks complete. Reciprocity ${state.metrics.reciprocityErrorDb.toFixed(2)} dB, convergence ${state.metrics.convergenceCoverageDeltaPct.toFixed(2)} pct.`;
-          updateMetricsPanel();
-          postMetrics();
-        }, 30);
-      }, 30);
-    }
-
-    function scheduleTrace() {
-      clearTimeout(state.retraceTimer);
-      const elev = Number(elevSlider.value);
-      const az = Number(azSlider.value);
-      elevOut.textContent = String(elev);
-      azOut.textContent = String(az);
-      const canonical = elev === CANONICAL.elevBeams && az === CANONICAL.azBeams;
-      statusEl.textContent = canonical
-        ? "Canonical fan selected. Retracing..."
-        : "Off-canonical fan selected. Metric card will be flagged off-canonical.";
-      state.retraceTimer = setTimeout(performTrace, 500);
-    }
-
-    function togglePanel(targetName) {
-      const panel = {
-        controls: document.getElementById("controls"),
-        metrics: document.getElementById("metrics"),
-        status: document.getElementById("statusPanel")
-      }[targetName];
-      if (!panel) return;
-      const button = document.querySelector(`[data-minimize-target="${targetName}"]`);
-      const minimized = panel.classList.toggle("is-minimized");
-      if (button) {
-        button.textContent = minimized ? "+" : "−";
-        button.setAttribute("aria-expanded", String(!minimized));
-        button.setAttribute("aria-label", minimized ? `Expand ${targetName}` : `Minimize ${targetName}`);
-      }
-    }
-
-    function toggleCanvasCard() {
-      const button = sectionToggleBtn;
-      const nextValue = !state.showCrossSection;
-      state.showCrossSection = nextValue;
-      xsectionWrap.style.display = nextValue ? "" : "none";
-      button.classList.toggle("active", nextValue);
-      button.setAttribute("aria-pressed", String(nextValue));
-    }
-
-    function toggleArrivals() {
-      const button = arrivalsToggleBtn;
-      const nextValue = !state.showArrivals;
-      state.showArrivals = nextValue;
-      button.classList.toggle("active", nextValue);
-      button.setAttribute("aria-pressed", String(nextValue));
-    }
-
-    function makeFloatingPanelDraggable(el) {
-      el.addEventListener("pointerdown", event => {
-        if (event.target.closest(".float-min, .panel-toggle")) return;
-        event.preventDefault();
-        const rect = el.getBoundingClientRect();
-        const parentRect = el.offsetParent.getBoundingClientRect();
-        el.style.left = `${rect.left - parentRect.left}px`;
-        el.style.top = `${rect.top - parentRect.top}px`;
-        el.style.right = "auto";
-        el.style.bottom = "auto";
-        el.style.transform = "none";
-        const startX = event.clientX;
-        const startY = event.clientY;
-        const originLeft = parseFloat(el.style.left);
-        const originTop = parseFloat(el.style.top);
-        el.classList.add("dragging");
-        el.setPointerCapture(event.pointerId);
-
-        function onMove(moveEvent) {
-          el.style.left = `${originLeft + moveEvent.clientX - startX}px`;
-          el.style.top = `${originTop + moveEvent.clientY - startY}px`;
-        }
-        function onUp() {
-          el.classList.remove("dragging");
-          el.removeEventListener("pointermove", onMove);
-          el.removeEventListener("pointerup", onUp);
-        }
-        el.addEventListener("pointermove", onMove);
-        el.addEventListener("pointerup", onUp);
-      });
-    }
-
-    function initFloatingPanels() {
-      document.querySelectorAll(".float-wrap").forEach(makeFloatingPanelDraggable);
-      document.querySelectorAll(".float-min").forEach(btn => {
-        btn.addEventListener("click", event => {
-          event.stopPropagation();
-          const collapsed = btn.closest(".float-wrap").classList.toggle("collapsed");
-          btn.textContent = collapsed ? "+" : "−";
-          btn.title = collapsed ? "Expand" : "Minimize";
-          btn.setAttribute("aria-label", collapsed ? "Expand panel" : "Minimize panel");
-        });
-      });
-    }
-
-    function attachEvents() {
-      window.addEventListener("resize", resizeCanvas);
-
-      document.querySelectorAll("[data-minimize-target]").forEach(button => {
-        button.addEventListener("click", () => {
-          const target = button.getAttribute("data-minimize-target");
-          if (target === "section") {
-            toggleCanvasCard();
-          } else if (target === "arrivals") {
-            toggleArrivals();
-          } else {
-            togglePanel(target);
-          }
-        });
-      });
-
-      playBtn.addEventListener("click", () => {
-        if (state.tracing) return;
-        state.playing = !state.playing;
-        playBtn.textContent = state.playing ? "Pause" : "Play";
-      });
-
-      resetBtn.addEventListener("click", () => {
-        state.playing = false;
-        state.currentTime = 0;
-        timeSlider.value = "0";
-        timeOut.textContent = "0.0 s";
-        playBtn.textContent = "Play";
-      });
-
-      cameraBtn.addEventListener("click", resetCamera);
-
-      canonicalBtn.addEventListener("click", () => {
-        elevSlider.value = String(CANONICAL.elevBeams);
-        azSlider.value = String(CANONICAL.azBeams);
-        elevOut.textContent = String(CANONICAL.elevBeams);
-        azOut.textContent = String(CANONICAL.azBeams);
-        scheduleTrace();
-      });
-
-      elevSlider.addEventListener("input", scheduleTrace);
-      azSlider.addEventListener("input", scheduleTrace);
-
-      timeSlider.addEventListener("input", () => {
-        state.currentTime = Number(timeSlider.value);
-        timeOut.textContent = `${state.currentTime.toFixed(1)} s`;
-      });
-
-      opacitySlider.addEventListener("input", () => {
-        opacityOut.textContent = `${opacitySlider.value}%`;
-      });
-
-      tlToggle.addEventListener("change", () => {
-        colorbarEl.classList.toggle("show", tlToggle.checked);
-      });
-
-      canvas.addEventListener("pointerdown", event => {
-        canvas.setPointerCapture(event.pointerId);
-        state.pointer = {
-          id: event.pointerId,
-          x: event.clientX,
-          y: event.clientY,
-          yaw: camera.yaw,
-          pitch: camera.pitch
-        };
-      });
-
-      canvas.addEventListener("pointermove", event => {
-        if (!state.pointer || state.pointer.id !== event.pointerId) return;
-        const dx = event.clientX - state.pointer.x;
-        const dy = event.clientY - state.pointer.y;
-        camera.yaw = state.pointer.yaw + dx * 0.006;
-        camera.pitch = clamp(state.pointer.pitch + dy * 0.005, -1.08, 1.08);
-      });
-
-      canvas.addEventListener("pointerup", event => {
-        if (state.pointer && state.pointer.id === event.pointerId) state.pointer = null;
-      });
-
-      canvas.addEventListener("pointercancel", () => {
-        state.pointer = null;
-      });
-
-      canvas.addEventListener("wheel", event => {
-        event.preventDefault();
-        const factor = Math.exp(-event.deltaY * 0.001);
-        camera.zoom = clamp(camera.zoom * factor, 0.55, 2.4);
-      }, { passive: false });
-    }
-
-    function init() {
-      state.seabedMesh = buildSeabedMesh();
-      state.crossSection = buildCrossSection();
-      resizeCanvas();
-      attachEvents();
-      initFloatingPanels();
-      drawTLBarCanvas();
-      updateMetricsPanel();
-      requestAnimationFrame(render);
-      performTrace();
-    }
-
-    window.rayViewDebug = {
-      traceRay,
-      traceFan,
-      soundSpeed,
-      bathymetry,
-      bathymetryGradient,
-      state,
-      camera,
-      constants: { DOMAIN, SOURCE, RECEIVER, CANONICAL, GRID, CAMERA_HOME, CAMERA_FRAME }
-    };
-
-    init();
+    requestAnimationFrame(renderLoop);
+    initialise();
+  })();
   </script>
-<script>
-(function(){
-  var CTRL_SELS=['.topbar'];
-  var ALL_SELS=['.topbar','#statusPanel','#tlbar-wrap','#legend-wrap','#xsect-wrap'];
-  window.addEventListener('message',function(e){
-    var d=e.data; if(!d)return;
-    var t=d.type,v,btn,es,as,ss,os,opts,minD,nearest;
-    if(t==='hide_ui'){
-      v=d.hidden?'none':'';
-      ALL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display=v;});});
-    } else if(t==='hide_controls'){
-      ALL_SELS.forEach(function(s){document.querySelectorAll(s).forEach(function(el){el.style.display='none';});});
-    } else if(t==='play'){
-      btn=document.getElementById('playBtn'); if(btn&&btn.textContent==='Play')btn.click();
-    } else if(t==='pause'){
-      btn=document.getElementById('playBtn'); if(btn&&btn.textContent==='Pause')btn.click();
-    } else if(t==='reset'){
-      btn=document.getElementById('resetBtn'); if(btn)btn.click();
-    } else if(t==='reset_camera'){
-      btn=document.getElementById('cameraBtn'); if(btn)btn.click();
-    } else if(t==='set_stop'){
-      es=document.getElementById('elevSlider'); as=document.getElementById('azSlider');
-      if(es&&d.elev!=null){es.value=d.elev; es.dispatchEvent(new Event('input'));}
-      if(as&&d.azim!=null){as.value=d.azim; as.dispatchEvent(new Event('input'));}
-    } else if(t==='set_speed'){
-      ss=document.getElementById('speedSelect');
-      if(ss){
-        opts=['0.25','0.5','1','2','4']; nearest='1'; minD=Infinity;
-        opts.forEach(function(o){var dv=Math.abs(+o-(+d.speed||1));if(dv<minD){minD=dv;nearest=o;}});
-        ss.value=nearest; ss.dispatchEvent(new Event('change'));
-      }
-    } else if(t==='set_time'){
-      if(window.rayViewDebug&&window.rayViewDebug.state){
-        window.rayViewDebug.state.playing=false;
-        window.rayViewDebug.state.currentTime=Math.max(0,Math.min(1,+d.t||0))*window.rayViewDebug.state.maxTime;
-        ss=document.getElementById('timeSlider');
-        if(ss){ss.value=String(window.rayViewDebug.state.currentTime); ss.dispatchEvent(new Event('input'));}
-      }
-    } else if(t==='set_opacity'){
-      os=document.getElementById('opacitySlider');
-      if(os){os.value=Math.round((+d.v||0)*100); os.dispatchEvent(new Event('input'));}
-    }
-  });
-})();
-</script>
 </body>
 </html>

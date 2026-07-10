@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [1.0.0] — 2026-07-03
 
 First tagged release of the UWA Ray-Propagation Benchmark: a five-way LLM
-benchmark (Fugu Ultra, Opus 4.8 Max, GPT 5.5 XH, Gemini 3.1 Pro, Fable 5 Max)
+benchmark (Fugu Ultra, Opus 4.8 Max, GPT 5.6 Sol Ultra, Gemini 3.1 Pro, Fable 5 Max)
 scored against a genuine 3D BELLHOP3D reference solve on a shared TL grid.
 
 ### Added

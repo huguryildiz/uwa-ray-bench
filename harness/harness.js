@@ -17,7 +17,7 @@ const NX=101, NY=49, NZ=31, TL_SHADOW=SCORING.TL_SHADOW, NTL=NX*NY*NZ;
 const PANELS=[
   {id:'fugu',      name:'Sakana Fugu'},
   {id:'opus',      name:'Opus 4.8 (max)'},
-  {id:'gpt',       name:'GPT 5.5 (XH)'},
+  {id:'gpt',       name:'GPT 5.6 (Sol Ultra)'},
   {id:'gemini',    name:'Gemini 3.1 Pro'},
   {id:'fable',     name:'Fable 5 (Max)'},
   {id:'reference', name:'BELLHOP3D'},
@@ -219,7 +219,9 @@ function normalizeMetrics(m){
   if(m.conv_tlR==null){
     let v=null;
     if(m.convergence?.tlDeltaDb!=null)       v=m.convergence.tlDeltaDb;    // Fugu
-    else if(m.convergenceTlDeltaDb!=null)    v=m.convergenceTlDeltaDb;     // GPT
+    else if(m.convergenceTlDeltaDb!=null)    v=m.convergenceTlDeltaDb;     // GPT (5.5 XH top-level)
+    else if(m.convergence?.tlRDeltaDb!=null) v=m.convergence.tlRDeltaDb;   // GPT (5.6 Sol Ultra object)
+    else if(m.convergence?.tlDelta!=null)    v=m.convergence.tlDelta;      // GPT (5.6 Sol Ultra object, alias)
     else if(m.convergence_err_tl!=null)      v=m.convergence_err_tl;       // Gemini
     else if(m.convergence?.dTL_R_dB!=null) v=m.convergence.dTL_R_dB;     // Opus (object)
     else if(m.convDTL_R_dB!=null)            v=m.convDTL_R_dB;            // Fable
