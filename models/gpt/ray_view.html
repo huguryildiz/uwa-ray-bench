@@ -260,7 +260,7 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
           <h1>Abyssal Ray Atlas</h1>
           <div class="scenario">Single source · deep sound channel · two finite seamounts · geometric ray-tube TL</div>
         </div>
-        <div class="scene-readout"><strong id="sceneStatus">Tracing canonical fan…</strong><span id="sceneTime">t = 0.00 s</span><br>depth ×5 · orthographic orbit</div>
+        <div class="scene-readout"><strong id="sceneStatus">Tracing canonical fan…</strong><span id="sceneTime">t = 0.00 s</span><br>depth ×5 · orthographic orbit<br><span id="camReadout">cam yaw −0.58 · pitch −0.32 · zoom 0.98×</span></div>
       </header>
       <div id="legend-wrap" class="float-wrap" aria-label="Scene legend">
         <div id="legend">
@@ -954,7 +954,9 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
     function drawScene() {
       resizeCanvas(scene,'canvas');const {dpr}=state.canvas;ctx.setTransform(dpr,0,0,dpr,0,0);projectionFrame=null;prepareProjection();drawOcean();drawSurface();drawBathymetry();drawCoverage(state.display);drawRays(state.display);drawBox();
       const reached=state.display?.receiver?.reached??state.metrics?.receiver.reached??false;drawMarker(C.S,'S','#f1d59f','#f4e8c8','SOURCE');drawMarker(C.R,'R','#78c5c3',reached?'#92bd72':'#d46c5b',state.display?.receiver?(reached?'REACHED':'UNREACHED'):'CALCULATING');drawColourbar();
-      $('sceneTime').textContent=`t = ${state.time.toFixed(2)} s`;state.dirty=false;
+      $('sceneTime').textContent=`t = ${state.time.toFixed(2)} s`;
+      {const c=state.camera;$('camReadout').textContent=`cam yaw ${c.yaw.toFixed(2)} · pitch ${c.pitch.toFixed(2)} · zoom ${c.zoom.toFixed(2)}×`;}
+      state.dirty=false;
     }
 
     function plotProject(x,z,w,h,m) {return {x:m.l+x/C.X*(w-m.l-m.r),y:m.t+z/C.Z*(h-m.t-m.b)};}
