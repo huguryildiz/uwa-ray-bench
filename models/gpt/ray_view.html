@@ -232,6 +232,7 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
     html.embedded .controls { display: none; }
     html.embedded .metric-panel { display: none; }
     html.embedded .scene-shell { border: none; }
+    html.embedded .loading { display: none; }
     /* scene fills the whole panel; the cross-section becomes a small floating x–z inset like the reference */
     html.embedded .app { position: relative; grid-template-columns: 1fr; grid-template-rows: 1fr; grid-template-areas: "scene"; }
     html.embedded .dock {
@@ -990,6 +991,17 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
     function setPlaying(on){if(!state.display)return;state.playing=on;if(on&&state.time>=state.display.maxTime-.01)state.time=0;$('playButton').textContent=on?'Pause':'Play';state.lastFrame=performance.now();state.dirty=state.plotDirty=true;}
     $('playButton').addEventListener('click',()=>setPlaying(!state.playing));
     $('resetButton').addEventListener('click',()=>{setPlaying(false);state.time=0;$('timeSlider').value=0;$('timeOutput').textContent='0.00 s';state.dirty=state.plotDirty=true;});
+    // harness sync: respond to Play all / Pause / Reset / speed / scrub so both panels animate together
+    window.addEventListener('message',e=>{
+      const m=e.data; if(!m||typeof m!=='object')return;
+      switch(m.type){
+        case'play': setPlaying(true); break;
+        case'pause': setPlaying(false); break;
+        case'reset': setPlaying(false); state.time=0; $('timeSlider').value=0; $('timeOutput').textContent='0.00 s'; state.dirty=state.plotDirty=true; break;
+        case'set_speed': if(m.speed>0)state.speed=m.speed; break;
+        case'set_time': if(m.t!=null&&state.display){setPlaying(false); state.time=clamp(m.t,0,1)*state.display.maxTime; $('timeSlider').value=state.time; $('timeOutput').textContent=`${state.time.toFixed(2)} s`; state.dirty=state.plotDirty=true;} break;
+      }
+    });
     function resetCamera(){state.camera={yaw:-.58,pitch:-.32,zoom:.98};state.dirty=true;}
     $('cameraButton').addEventListener('click',resetCamera);
     $('timeSlider').addEventListener('input',e=>{setPlaying(false);state.time=+e.target.value;$('timeOutput').textContent=`${state.time.toFixed(2)} s`;state.dirty=state.plotDirty=true;});
