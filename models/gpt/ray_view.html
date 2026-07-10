@@ -125,22 +125,25 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
     .scenario { max-width: 360px; margin-top: 7px; color: var(--muted); font-size: 11px; }
     .scene-readout { text-align: right; color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
     .scene-readout strong { display: block; color: var(--ink); font-size: 12px; letter-spacing: .02em; }
-    .legend {
-      position: absolute; left: clamp(10px, 2vw, 16px); bottom: 14px; z-index: 2;
-      display: flex; flex-direction: column; gap: 5px 0;
-      padding: 8px 11px; border: 1px solid rgba(100, 140, 255, .18); border-radius: 8px;
-      background: rgba(8, 14, 26, .72); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
-      color: #cfe3ff; font-size: 11px; letter-spacing: .01em;
-    }
-    .legend span { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-    .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex-shrink: 0; background: var(--cyan); }
-    .swatch.water { background: linear-gradient(135deg, #28768a, #06121f); }
-    .swatch.bed { background: #b08c5a; }
-    .swatch.rays { background: linear-gradient(135deg, #ef735f, #e9c46a, #69c6b8, #6298d3); }
-    .swatch.shadow { background: #050d17; border: 1px solid #335063; }
-    .swatch.s, .swatch.r { border-radius: 50%; }
-    .swatch.s { background: #ffd36b; }
-    .swatch.r { background: #9fe8ff; }
+    /* shared reference-style floating legend (draggable + minimizable) — matches BELLHOP3D + other model panels */
+    .float-wrap { position: absolute; z-index: 3; pointer-events: all; touch-action: none; cursor: grab; }
+    .float-wrap.dragging { cursor: grabbing; }
+    .float-min { position: absolute; top: 4px; right: 4px; z-index: 4; pointer-events: all;
+      background: rgba(20,35,62,.5); color: #7a82a6; border: 1px solid rgba(100,140,255,.18);
+      border-radius: 6px; width: 17px; height: 17px; padding: 0; font-size: 10px; font-weight: 600; line-height: 1;
+      cursor: pointer; display: flex; align-items: center; justify-content: center; transition: .15s; }
+    .float-min:hover { border-color: rgba(150,210,255,.34); color: var(--ink); }
+    .float-wrap.collapsed { width: auto !important; height: auto !important; }
+    .float-wrap.collapsed > *:not(.float-min) { display: none; }
+    .float-wrap.collapsed .float-min { position: static; width: auto; height: 20px; padding: 0 8px;
+      font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase; border-radius: 8px;
+      background: rgba(20,26,60,.7); backdrop-filter: blur(18px); }
+    #legend-wrap { left: clamp(10px, 2vw, 16px); bottom: 14px; }
+    #legend { background: rgba(8,14,26,.72); border: 1px solid rgba(100,140,255,.18); border-radius: 8px;
+      padding: 8px 10px; font: 11px -apple-system, sans-serif; color: #cfe3ff;
+      backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+    #legend .lg-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; white-space: nowrap; }
+    #legend .lg-sw { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
     .metric-panel {
       grid-area: metrics; min-width: 0; overflow: auto; padding: 18px 18px 28px;
       background: linear-gradient(180deg, rgba(9, 26, 41, 0.68), rgba(6, 14, 24, 0.72));
@@ -208,8 +211,7 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
       .app { grid-template-rows: clamp(360px, 55svh, 520px) auto auto; }
       .scene-head { padding: 14px; }
       .scenario { display: none; }
-      .legend { max-width: calc(100% - 24px); }
-      .legend span:nth-child(1), .legend span:nth-child(4) { display: none; }
+      #legend { max-width: calc(100% - 24px); }
       .dock { min-height: 720px; grid-template-rows: auto 1fr; }
       .controls { grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; overflow: visible; align-items: end; }
       .button-cluster { grid-column: 1 / -1; grid-template-columns: repeat(2, 1fr); }
@@ -238,13 +240,15 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
         </div>
         <div class="scene-readout"><strong id="sceneStatus">Tracing canonical fan…</strong><span id="sceneTime">t = 0.00 s</span><br>depth ×5 · orthographic orbit</div>
       </header>
-      <div class="legend" aria-label="Scene legend">
-        <span><i class="swatch water"></i> water</span>
-        <span><i class="swatch bed"></i> seabed</span>
-        <span><i class="swatch rays"></i> launch elevation</span>
-        <span><i class="swatch shadow"></i> shadow = empty</span>
-        <span><i class="swatch s"></i> source S</span>
-        <span><i class="swatch r"></i> receiver R</span>
+      <div id="legend-wrap" class="float-wrap" aria-label="Scene legend">
+        <div id="legend">
+          <div class="lg-row"><span class="lg-sw" style="background:#ffd36b"></span>source S</div>
+          <div class="lg-row"><span class="lg-sw" style="background:#9fe8ff"></span>receiver R</div>
+          <div class="lg-row"><span class="lg-sw" style="background:#b08c5a"></span>seabed / seamounts</div>
+          <div class="lg-row"><span class="lg-sw" style="background:#6cf"></span>rays (by launch angle)</div>
+          <div class="lg-row"><span class="lg-sw" style="background:#2aa0d0"></span>insonified TL volume</div>
+        </div>
+        <button class="float-min" title="Minimize">–</button>
       </div>
     </section>
 
@@ -987,6 +991,27 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
 
     requestAnimationFrame(renderLoop);
     initialise();
+
+    // shared floating-legend behaviour (draggable + minimizable) — matches BELLHOP3D + other panels
+    function makeDraggable(el){
+      el.addEventListener('pointerdown',e=>{
+        if(e.target.closest('.float-min'))return;
+        e.preventDefault();
+        const rect=el.getBoundingClientRect(), parentRect=el.offsetParent.getBoundingClientRect();
+        el.style.left=(rect.left-parentRect.left)+'px'; el.style.top=(rect.top-parentRect.top)+'px';
+        el.style.right='auto'; el.style.bottom='auto';
+        const sx=e.clientX, sy=e.clientY, ol=parseFloat(el.style.left), ot=parseFloat(el.style.top);
+        el.classList.add('dragging'); el.setPointerCapture(e.pointerId);
+        function onMove(e2){el.style.left=(ol+e2.clientX-sx)+'px'; el.style.top=(ot+e2.clientY-sy)+'px';}
+        function onUp(){el.classList.remove('dragging');
+          el.removeEventListener('pointermove',onMove); el.removeEventListener('pointerup',onUp);}
+        el.addEventListener('pointermove',onMove); el.addEventListener('pointerup',onUp);
+      });
+    }
+    document.querySelectorAll('.float-wrap').forEach(makeDraggable);
+    document.querySelectorAll('.float-min').forEach(btn=>{btn.onclick=e=>{e.stopPropagation();
+      const collapsed=btn.closest('.float-wrap').classList.toggle('collapsed');
+      btn.textContent=collapsed?'⤢':'–'; btn.title=collapsed?'Expand':'Minimize';};});
   })();
   </script>
 </body>
