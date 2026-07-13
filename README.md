@@ -122,10 +122,10 @@ would have hidden this and just picked one "winner."
 
 ```text
                      HARNESS CHROME  (harness/index.html + harness.js)
-   ┌────────┬────────┬────────┬────────-┬────────┬──────────────┐
-   │ Fugu UI│ Opus UI│ GPT UI │Gemini UI│Fable UI│ Reference UI │
-   │(Ultra) │(4.8max)│(5.6 SU)│(3.1 Pro)│  (5)   │ (BELLHOP3D)  │
-   └────────┴────────┴────────┴────────-┴────────┴──────────────┘
+   ┌────────┬─────────┬───────────┬─────────┬────────┬──────────────┐
+   │ Fugu UI│ Opus UI │  GPT UI   │Gemini UI│Fable UI│ Reference UI │
+   │(Ultra) │(4.8 Max)│(5.6 Sol U)│(3.1 Pro)│(5 Max) │ (BELLHOP3D)  │
+   └────────┴─────────┴───────────┴─────────┴────────┴──────────────┘
      opaque <iframe>s, each rendering its own vanilla-JS + WebGL scene
 ```
 
