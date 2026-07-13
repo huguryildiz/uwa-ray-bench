@@ -139,6 +139,15 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
       font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase; border-radius: 8px;
       background: rgba(20,26,60,.7); backdrop-filter: blur(18px); }
     #legend-wrap { left: clamp(10px, 2vw, 16px); bottom: 14px; }
+    /* shared reference-style TL colorbar (BELLHOP3D glass card) */
+    #tlbar-wrap { right: 16px; top: 70px; }
+    #tlbar-inner { display: flex; align-items: center; gap: 6px; background: rgba(8,14,26,.55);
+      border-radius: 8px; padding: 8px 10px; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+    #tlbar-inner .tl-col { display: flex; flex-direction: column; align-items: center; gap: 4px;
+      font: 11px -apple-system, sans-serif; color: #cfe3ff; }
+    #tlbar { border-radius: 2px; display: block; }
+    #tlbar-inner .tl-side { writing-mode: vertical-rl; transform: rotate(180deg);
+      font: 11px -apple-system, sans-serif; color: #cfe3ff; }
     #legend { background: rgba(8,14,26,.72); border: 1px solid rgba(100,140,255,.18); border-radius: 8px;
       padding: 8px 10px; font: 11px -apple-system, sans-serif; color: #cfe3ff;
       backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
@@ -269,6 +278,13 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
           <div class="lg-row"><span class="lg-sw" style="background:#b08c5a"></span>seabed / seamounts</div>
           <div class="lg-row"><span class="lg-sw" style="background:#6cf"></span>rays (by launch angle)</div>
           <div class="lg-row"><span class="lg-sw" style="background:#2aa0d0"></span>insonified TL volume</div>
+        </div>
+        <button class="float-min" title="Minimize">–</button>
+      </div>
+      <div id="tlbar-wrap" class="float-wrap" aria-label="TL colour scale">
+        <div id="tlbar-inner">
+          <div class="tl-col"><span>115</span><canvas id="tlbar" width="12" height="150"></canvas><span>45 dB</span></div>
+          <span class="tl-side">TL (dB)</span>
         </div>
         <button class="float-min" title="Minimize">–</button>
       </div>
@@ -947,8 +963,12 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
       labelPoint({x:C.X*.72,y:C.Y,z:0},'SURFACE z = 0',10,-6,'#9bc9c8');labelPoint({x:C.X*.78,y:C.Y,z:bathy(C.X*.78,C.Y)},'SEABED D(x,y)',10,10,'#d6b97a');
     }
 
+    function drawTLBarCanvas() {
+      const c=$('tlbar'); if(!c)return; const tctx=c.getContext('2d'), bh=c.height;
+      for(let y=0;y<bh;y++){const tl=115-(y/bh)*70; tctx.fillStyle=tlColour(tl,1); tctx.fillRect(0,y,c.width,1);}
+    }
     function drawColourbar() {
-      if(!state.tlColour)return;const {w,h}=state.canvas,x=w-42,y=h*.34,bh=Math.min(160,h*.34),bw=8;for(let i=0;i<bh;i++){ctx.fillStyle=tlColour(55+(C.TL_CUT-55)*i/bh,1);ctx.fillRect(x,y+i,bw,1);}ctx.fillStyle='#dbe4dc';ctx.font='9px system-ui,sans-serif';ctx.textAlign='right';ctx.fillText('55 dB',x-4,y+4);ctx.fillText('110',x-4,y+bh);ctx.save();ctx.translate(x+25,y+bh/2);ctx.rotate(Math.PI/2);ctx.textAlign='center';ctx.fillText('RAY-TUBE TL',0,0);ctx.restore();
+      const wrap=$('tlbar-wrap'); if(wrap) wrap.style.display=state.tlColour?'':'none';
     }
 
     function drawScene() {
@@ -1052,6 +1072,7 @@ ASSUMPTIONS AND NUMERICAL MODEL (all physics coordinates are metres; time is sec
     document.querySelectorAll('.float-min').forEach(btn=>{btn.onclick=e=>{e.stopPropagation();
       const collapsed=btn.closest('.float-wrap').classList.toggle('collapsed');
       btn.textContent=collapsed?'⤢':'–'; btn.title=collapsed?'Expand':'Minimize';};});
+    drawTLBarCanvas(); $('tlbar-wrap').style.display=state.tlColour?'':'none';
   })();
   </script>
 </body>
